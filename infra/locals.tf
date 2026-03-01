@@ -5,7 +5,7 @@ locals {
   common_tags = {
     Project   = var.project_name
     ManagedBy = "Terraform"
-    CreatedAt = timestamp()
+    Environment = local.environment
   }
 
   name_suffix = "${var.project_name}-${local.environment}"

@@ -14,7 +14,7 @@ resource "aws_db_instance" "postgres" {
   vpc_security_group_ids = var.vpc_security_group_ids
 
   skip_final_snapshot = true
-  publicly_accessible = false
+  publicly_accessible = true
   deletion_protection = false
 
   enabled_cloudwatch_logs_exports = []
@@ -38,6 +38,8 @@ resource "aws_db_parameter_group" "postgres" {
     name  = "log_min_duration_statement"
     value = "200"
   }
+
+  tags = var.common_tags
 }
 
 resource "aws_cloudwatch_log_group" "rds_logs" {

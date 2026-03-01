@@ -1,3 +1,13 @@
+variable "public_subnet_ids" {
+  description = "List of public subnet IDs for RDS subnet group"
+  type        = list(string)
+}
+
+variable "db_subnet_group_name" {
+  description = "VPC Subnet Group for the RDS"
+  type        = string
+}
+
 variable "identifier" {
   description = "The name of the RDS instance"
   type        = string
@@ -40,10 +50,10 @@ variable "master_password" {
   sensitive   = true
 }
 
-variable "db_subnet_group_name" {
-  description = "VPC Subnet Group for the RDS"
-  type        = string
-}
+# variable "db_subnet_group_name" {
+#   description = "VPC Subnet Group for the RDS"
+#   type        = string
+# }
 
 variable "vpc_security_group_ids" {
   description = "Security Groups IDs"

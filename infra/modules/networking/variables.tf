@@ -7,3 +7,8 @@ variable "common_tags" {
   description = "Common tags for all resources"
   type        = map(string)
 }
+
+variable "allowed_ip_cidr" {
+  description = "Allowed IP CIDR for RDS access"
+  type        = string
+}

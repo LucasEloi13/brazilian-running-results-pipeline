@@ -82,7 +82,7 @@ resource "aws_security_group" "rds" {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"]
+     cidr_blocks = [var.allowed_ip_cidr]
   }
 
   egress {
@@ -102,7 +102,7 @@ resource "aws_security_group" "rds" {
 
 resource "aws_db_subnet_group" "main" {
   name       = "${var.name_suffix}-db-subnet-group"
-  subnet_ids = aws_subnet.private[*].id
+  subnet_ids = concat(aws_subnet.public[*].id, aws_subnet.private[*].id)
 
   tags = merge(
     var.common_tags,
