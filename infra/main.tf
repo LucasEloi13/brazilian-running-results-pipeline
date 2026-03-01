@@ -1,0 +1,21 @@
+# Networking (VPC, Security Groups, etc)
+module "networking" {
+  source = "./modules/networking"
+
+  name_suffix = local.name_suffix
+  common_tags = local.common_tags
+}
+
+module "rds" {
+  source = "./modules/rds"
+
+  identifier      = local.name_suffix
+  master_password = var.rds_master_password
+
+  db_subnet_group_name   = module.networking.db_subnet_group_name
+  vpc_security_group_ids = [module.networking.rds_security_group_id]
+
+  common_tags = local.common_tags
+
+  depends_on = [module.networking]
+}

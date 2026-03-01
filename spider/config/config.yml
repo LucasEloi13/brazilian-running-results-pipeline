@@ -1,0 +1,12 @@
+base_url: https://openresults.run
+
+extact_event_name: 
+  api_endpoint: "/api/eventos.cfm"
+  request_delay: 1.0
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+
+logging:
+  log_level: INFO
+  log_dir: logs
+  log_filename: app.log
+
