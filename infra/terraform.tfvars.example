@@ -1,7 +1,7 @@
-aws_region           = "us-east-1"
-aws_profile          = "aws-profile-name"
-terraform_role_arn   = "arn:aws:iam::XZZXWDZZAA:role/ExecutionRoleName"
+aws_region         
+aws_profile        
 
-project_name = "running-results"
+rds_master_password = 
 
-# rds_master_password = "your-password-here"
+allowed_ip_cidr = 
+terraform_role_arn = 

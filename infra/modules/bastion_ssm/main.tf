@@ -16,7 +16,6 @@ resource "aws_instance" "this" {
   iam_instance_profile        = var.instance_profile
   associate_public_ip_address = false
 
-  #tags = merge(var.common_#tags, { Name = "${var.name_suffix}-bastion-ssm" })
 }
 
 output "instance_id" {

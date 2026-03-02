@@ -1,4 +1,3 @@
-# Tags comuns para todos os recursos
 locals {
   environment = "personal"
 
