@@ -132,7 +132,7 @@ def _parse_page(html: str, base_url: str) -> list[EventName]:
                 dist_finishers = _parse_int(finishers_match.group(1))
             
             distances.append({
-                "km": km_m.group(1) + "k",
+                "km": km_m.group(1),
                 "finishers": dist_finishers,
             })
 

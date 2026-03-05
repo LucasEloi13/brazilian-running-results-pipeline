@@ -3,6 +3,7 @@ import yaml
 import logging
 from config.logger_config import setup_global_logger
 from src.extractors.event_name_extractor import EventNameExtractor
+from src.database.connections.postgres import PostgresConnection
 
 # Get logger with custom name (single file, no self.logger needed)
 logger = logging.getLogger("main")
@@ -25,7 +26,8 @@ if __name__ == "__main__":
     
     logger.info("Application started")
 
-    
+    # Initialize database connection
+    db = PostgresConnection()
     
     # Create extractor
     extractor = EventNameExtractor(config)

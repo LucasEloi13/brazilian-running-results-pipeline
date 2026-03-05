@@ -7,7 +7,6 @@ from dataclasses import asdict
 from src.extractors.base import Extractor
 from src.parses.event_name_parser import _has_events, _parse_page
 
-# Get logger with class name (single file, no self.logger needed)
 logger = logging.getLogger("EventNameExtractor")
 
 

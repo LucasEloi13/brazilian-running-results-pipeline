@@ -4,4 +4,4 @@ __pycache__/
 
 .DS_Store
 
-spider/logs
+spider/logs/app.log
