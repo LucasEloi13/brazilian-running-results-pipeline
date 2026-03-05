@@ -7,6 +7,10 @@ from src.database.connections.postgres import PostgresConnection
 
 logger = logging.getLogger("EventNameStorage")
 
+UNKNOWN_STATE_ABBR = "NI"
+UNKNOWN_STATE_NAME = "Não informado"
+UNKNOWN_CITY_NAME = "Não informado"
+
 
 STATE_NAME_BY_ABBR = {
 	"AC": "Acre",
@@ -58,9 +62,14 @@ class EventNameStorage:
 	def _get_or_create_state(self, cur, state_abbr: str) -> int:
 		abbreviation = (state_abbr or "").strip().upper()
 		if len(abbreviation) != 2:
-			raise ValueError(f"State abbreviation inválida: {state_abbr}")
+			logger.warning(
+				"State abbreviation inválida (%s). Usando fallback=%s",
+				state_abbr,
+				UNKNOWN_STATE_ABBR,
+			)
+			abbreviation = UNKNOWN_STATE_ABBR
 
-		state_name = STATE_NAME_BY_ABBR.get(abbreviation, abbreviation)
+		state_name = STATE_NAME_BY_ABBR.get(abbreviation, UNKNOWN_STATE_NAME)
 
 		cur.execute(
 			"""
@@ -77,7 +86,8 @@ class EventNameStorage:
 	def _get_or_create_city(self, cur, city_name: str, state_id: int) -> int:
 		normalized_name = (city_name or "").strip()
 		if not normalized_name:
-			raise ValueError("City name vazio")
+			logger.warning("City name vazio. Usando fallback=%s", UNKNOWN_CITY_NAME)
+			normalized_name = UNKNOWN_CITY_NAME
 
 		cur.execute(
 			"""

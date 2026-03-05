@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS event (
     name        VARCHAR(255)    NOT NULL,
     city_id     INT             NOT NULL,
     date_id     INT             NOT NULL,
+    created_at   TIMESTAMPTZ    NOT NULL    DEFAULT NOW(),
 
     CONSTRAINT fk_event_city     FOREIGN KEY (city_id)   REFERENCES city (id),
     CONSTRAINT fk_event_date     FOREIGN KEY (date_id)   REFERENCES date (id),
