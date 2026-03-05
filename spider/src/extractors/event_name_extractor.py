@@ -32,7 +32,11 @@ class EventNameExtractor(Extractor):
         all_events: list[dict] = []
         logger.info(f"Starting extraction of {pages} pages")
         for page_num in range(1, pages + 1):
-            html = self._fetch_page(page_num)
+            try:
+                html = self._fetch_page(page_num)
+            except requests.HTTPError as exc:
+                logger.error(f"Failed fetching page {page_num}: {exc}")
+                break
             
             if not _has_events(html):
                 logger.info(f"Page {page_num} has no events. Stopping.")
