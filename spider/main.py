@@ -4,6 +4,7 @@ import logging
 from config.logger_config import setup_global_logger
 from src.extractors.event_name_extractor import EventNameExtractor
 from src.database.connections.postgres import PostgresConnection
+from src.storage.event_name_storage import EventNameStorage
 
 # Get logger with custom name (single file, no self.logger needed)
 logger = logging.getLogger("main")
@@ -31,9 +32,16 @@ if __name__ == "__main__":
     
     # Create extractor
     extractor = EventNameExtractor(config)
+    storage = EventNameStorage(db)
     
     # Extract 2 pages (pages 1 and 2)
     all_events = extractor.extract(pages=2)
+    storage_summary = storage.store_events(all_events)
+    logger.info(
+        "Persistência de eventos finalizada: %s inseridos, %s ignorados",
+        storage_summary["inserted"],
+        storage_summary["skipped"],
+    )
     
     # Print results
     print("\nPrimeiros 15 eventos:")

@@ -5,7 +5,7 @@
 -- -----------------------------------------------------------------------------
 -- State
 -- -----------------------------------------------------------------------------
-CREATE TABLE state (
+CREATE TABLE IF NOT EXISTS state (
     id              SMALLSERIAL     PRIMARY KEY,
     name            VARCHAR(100)    NOT NULL,
     abbreviation    CHAR(2)         NOT NULL,
@@ -17,7 +17,7 @@ CREATE TABLE state (
 -- -----------------------------------------------------------------------------
 -- City
 -- -----------------------------------------------------------------------------
-CREATE TABLE city (
+CREATE TABLE IF NOT EXISTS city (
     id          SERIAL          PRIMARY KEY,
     name        VARCHAR(150)    NOT NULL,
     state_id    SMALLINT        NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE city (
 -- Date dimension
 -- Separada para permitir enriquecimento (feriados, etc.)
 -- -----------------------------------------------------------------------------
-CREATE TABLE date (
+CREATE TABLE IF NOT EXISTS date (
     id              SERIAL      PRIMARY KEY,
     date            DATE        NOT NULL,
     day             SMALLINT    NOT NULL    CHECK (day BETWEEN 1 AND 31),
@@ -44,19 +44,19 @@ CREATE TABLE date (
 );
 
 -- -----------------------------------------------------------------------------
--- Race (Corrida)
+-- Event 
 -- -----------------------------------------------------------------------------
-CREATE TABLE race (
+CREATE TABLE IF NOT EXISTS event (
     id          SERIAL          PRIMARY KEY,
-    hash_id     CHAR(32)        NOT NULL,   -- MD5 do slug
     slug        VARCHAR(255)    NOT NULL,   -- "maratona-de-sao-paulo-2023"
+    hash_slug     CHAR(32)        NOT NULL,   -- MD5 do slug
     name        VARCHAR(255)    NOT NULL,
     city_id     INT             NOT NULL,
     date_id     INT             NOT NULL,
 
-    CONSTRAINT fk_race_city     FOREIGN KEY (city_id)   REFERENCES city (id),
-    CONSTRAINT fk_race_date     FOREIGN KEY (date_id)   REFERENCES date (id),
-    CONSTRAINT uq_race_hash     UNIQUE (hash_id)
+    CONSTRAINT fk_event_city     FOREIGN KEY (city_id)   REFERENCES city (id),
+    CONSTRAINT fk_event_date     FOREIGN KEY (date_id)   REFERENCES date (id),
+    CONSTRAINT uq_event_hash     UNIQUE (hash_slug)
 );
 
 -- -----------------------------------------------------------------------------
@@ -65,14 +65,14 @@ CREATE TABLE race (
 -- distance armazena só o número em km, sem o "K"
 -- finishers é o total de finishers naquela modalidade
 -- -----------------------------------------------------------------------------
-CREATE TABLE modality (
+CREATE TABLE IF NOT EXISTS modality (
     id          SERIAL      PRIMARY KEY,
-    race_id     INT         NOT NULL,
+    event_id     INT         NOT NULL,
     distance    SMALLINT    NOT NULL    CHECK (distance > 0),
     finishers   INT                     CHECK (finishers >= 0),
 
-    CONSTRAINT fk_modality_race     FOREIGN KEY (race_id) REFERENCES race (id),
-    CONSTRAINT uq_modality_race     UNIQUE (race_id, distance)
+    CONSTRAINT fk_modality_event     FOREIGN KEY (event_id) REFERENCES event (id),
+    CONSTRAINT uq_modality_event     UNIQUE (event_id, distance)
 );
 
 -- -----------------------------------------------------------------------------
@@ -80,7 +80,7 @@ CREATE TABLE modality (
 -- Ex: M1624, F2029, M3039...
 -- Tabela global — categorias são reaproveitadas entre corridas
 -- -----------------------------------------------------------------------------
-CREATE TABLE category (
+CREATE TABLE IF NOT EXISTS category (
     id      SMALLSERIAL     PRIMARY KEY,
     name    VARCHAR(20)     NOT NULL,
 
@@ -91,9 +91,9 @@ CREATE TABLE category (
 -- Result (Resultado)
 -- Consolidação de corrida + modalidade + categoria + atleta
 -- -----------------------------------------------------------------------------
-CREATE TABLE result (
+CREATE TABLE IF NOT EXISTS result (
     id              BIGSERIAL       PRIMARY KEY,
-    race_id         INT             NOT NULL,
+    event_id         INT             NOT NULL,
     modality_id     INT             NOT NULL,
     category_id     SMALLINT        NOT NULL,
     overall_pos     INT             NOT NULL    CHECK (overall_pos > 0),
@@ -104,7 +104,7 @@ CREATE TABLE result (
     finish_time     INTERVAL        NOT NULL,
     gap             INTERVAL,
 
-    CONSTRAINT fk_result_race       FOREIGN KEY (race_id)       REFERENCES race (id),
+    CONSTRAINT fk_result_event       FOREIGN KEY (event_id)       REFERENCES event (id),
     CONSTRAINT fk_result_modality   FOREIGN KEY (modality_id)   REFERENCES modality (id),
     CONSTRAINT fk_result_category   FOREIGN KEY (category_id)   REFERENCES category (id),
 
