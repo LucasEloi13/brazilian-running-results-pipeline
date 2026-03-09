@@ -112,3 +112,47 @@ CREATE TABLE IF NOT EXISTS result (
     -- Evita duplicatas na reingestão
     CONSTRAINT uq_result UNIQUE (modality_id, category_id, bib_number)
 );
+
+-- -----------------------------------------------------------------------------
+-- Extraction Job
+-- 1 job por evento — controle macro
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS extraction_job (
+    id          SERIAL      PRIMARY KEY,
+    event_id    INT         NOT NULL REFERENCES event(id),
+    status      VARCHAR(20) NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'completed', 'failed')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_job_event UNIQUE (event_id)
+);
+
+-- -----------------------------------------------------------------------------
+-- Extraction Task
+-- 1 task por (modality_id x gender) — controle granular
+-- modality_id já existe no banco, não precisa de distance aqui
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS extraction_task (
+    id              SERIAL      PRIMARY KEY,
+    job_id          INT         NOT NULL REFERENCES extraction_job(id),
+    modality_id     INT         NOT NULL REFERENCES modality(id),
+    gender          CHAR(1)     NOT NULL CHECK (gender IN ('M', 'F')),
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'completed', 'failed')),
+    s3_path         TEXT,
+    redshift_loaded BOOLEAN     NOT NULL DEFAULT FALSE,
+    row_count       INT,
+    attempts        SMALLINT    NOT NULL DEFAULT 0,
+    last_attempt_at TIMESTAMPTZ,
+    error_msg       TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_task UNIQUE (job_id, modality_id, gender)
+);
+
+CREATE INDEX idx_job_status       ON extraction_job(status);
+CREATE INDEX idx_task_status      ON extraction_task(status);
+CREATE INDEX idx_task_pending     ON extraction_task(status)
+    WHERE status IN ('pending', 'failed');
+CREATE INDEX idx_task_s3_pending  ON extraction_task(redshift_loaded)
+    WHERE status = 'completed' AND redshift_loaded = FALSE;

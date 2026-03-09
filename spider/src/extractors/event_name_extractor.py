@@ -31,7 +31,7 @@ class EventNameExtractor(Extractor):
     def extract(self, pages: int = 1, **kwargs) -> list[dict]:
         all_events: list[dict] = []
         logger.info(f"Starting extraction of {pages} pages")
-        for page_num in range(1, pages + 1):
+        for page_num in range(0, pages):
             try:
                 html = self._fetch_page(page_num)
             except requests.HTTPError as exc:
@@ -46,7 +46,7 @@ class EventNameExtractor(Extractor):
             all_events.extend(asdict(e) for e in events)
 
             logger.info(f"Page {page_num} extracted {len(events)} events (total={len(all_events)})")
-            if page_num < pages:
+            if page_num < pages - 1:
                 time.sleep(self.request_delay)
         logger.info(f"Extraction completed: {len(all_events)} events extracted")
         return all_events

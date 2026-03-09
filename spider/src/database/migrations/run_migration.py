@@ -11,6 +11,30 @@ from src.database.connections.postgres import PostgresConnection
 logger = logging.getLogger("RunMigration")
 
 
+def _print_usage() -> None:
+    """Print usage instructions."""
+    print("""
+╔════════════════════════════════════════════════════════════════════╗
+║                    Database Migration Script                       ║
+╚════════════════════════════════════════════════════════════════════╝
+
+USAGE:
+    python run_migration.py              # Executes normal migration
+    python run_migration.py --hard-reset # Reset + Migration (with confirmation)
+
+DESCRIPTION:
+    • Normal: Creates tables if they don't exist (idempotent)
+    • --hard-reset: Destroys ALL tables and recreates from scratch (irreversible!)
+
+⚠️  WARNING: The --reset flag discards ALL data!
+    
+EXAMPLE:
+    $ python run_migration.py --hard-reset
+    Type 'yes' to confirm the reset: yes
+    [Tables destroyed and recreated]
+""")
+
+
 def _split_sql_statements(sql_script: str) -> list[str]:
     statements: list[str] = []
     buffer: list[str] = []
@@ -41,24 +65,24 @@ def _split_sql_statements(sql_script: str) -> list[str]:
 def run_migration(sql_file: Path | None = None) -> None:
     migration_file = sql_file or Path(__file__).with_name("migration.sql")
     if not migration_file.exists():
-        raise FileNotFoundError(f"Migration file não encontrado: {migration_file}")
+        raise FileNotFoundError(f"Migration file not found: {migration_file}")
 
     sql_script = migration_file.read_text(encoding="utf-8")
     statements = _split_sql_statements(sql_script)
 
     if not statements:
-        logger.warning("Nenhum statement SQL encontrado em %s", migration_file)
+        logger.warning("No SQL statements found in %s", migration_file)
         return
 
     db = PostgresConnection()
-    logger.info("Iniciando migration: %s", migration_file)
+    logger.info("Starting migration: %s", migration_file)
 
     with db.cursor() as cur:
         for idx, statement in enumerate(statements, start=1):
             cur.execute(statement)
-            logger.info("Statement %s/%s executado com sucesso", idx, len(statements))
+            logger.info("Statement %s/%s executed successfully", idx, len(statements))
 
-    logger.info("Migration finalizada com sucesso. %s statements aplicados.", len(statements))
+    logger.info("Migration completed successfully. %s statements applied.", len(statements))
 
 
 def main() -> None:
@@ -66,6 +90,31 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
     )
+    
+    # Show help if requested
+    if "--help" in sys.argv or "-h" in sys.argv:
+        _print_usage()
+        return
+    
+    # Check for --hard-reset flag
+    should_reset = "--hard-reset" in sys.argv
+    
+    if should_reset:
+        logger.warning("=" * 80)
+        logger.warning("⚠️  WARNING: Running RESET — all tables will be destroyed!")
+        logger.warning("=" * 80)
+        
+        # Request confirmation
+        response = input("\nType 'yes' to confirm the complete reset: ")
+        if response.lower() != "yes":
+            logger.info("Reset cancelled by user.")
+            return
+        
+        reset_file = Path(__file__).with_name("reset_migration.sql")
+        run_migration(sql_file=reset_file)
+        logger.info("Reset completed. Running standard migration...")
+    
+    # Execute normal migration
     run_migration()
 
 

@@ -63,7 +63,7 @@ class EventNameStorage:
 		abbreviation = (state_abbr or "").strip().upper()
 		if len(abbreviation) != 2:
 			logger.warning(
-				"State abbreviation inválida (%s). Usando fallback=%s",
+				"Invalid state abbreviation (%s). Using fallback=%s",
 				state_abbr,
 				UNKNOWN_STATE_ABBR,
 			)
@@ -86,7 +86,7 @@ class EventNameStorage:
 	def _get_or_create_city(self, cur, city_name: str, state_id: int) -> int:
 		normalized_name = (city_name or "").strip()
 		if not normalized_name:
-			logger.warning("City name vazio. Usando fallback=%s", UNKNOWN_CITY_NAME)
+			logger.warning("City name is empty. Using fallback=%s", UNKNOWN_CITY_NAME)
 			normalized_name = UNKNOWN_CITY_NAME
 
 		cur.execute(
@@ -107,7 +107,7 @@ class EventNameStorage:
 		year = event.get("year")
 
 		if day is None or month is None or year is None:
-			raise ValueError("Data da corrida incompleta")
+			raise ValueError("Incomplete race date")
 
 		event_date = dt_date(int(year), int(month), int(day))
 		day_of_week = event_date.isoweekday()
@@ -147,11 +147,11 @@ class EventNameStorage:
 		)
 		return cur.fetchone()[0]
 
-	def _insert_modalities(self, cur, event_id: int, distances: list[dict[str, Any]] | None) -> int:
+	def _insert_modalities(self, cur, event_id: int, distances: list[dict[str, Any]] | None) -> list[int]:
 		if not distances:
-			return 0
+			return []
 
-		inserted_count = 0
+		modality_ids = []
 		for distance_item in distances:
 			km_raw = distance_item.get("km")
 			if km_raw is None:
@@ -171,41 +171,81 @@ class EventNameStorage:
 				VALUES (%s, %s, %s)
 				ON CONFLICT (event_id, distance) DO UPDATE
 					SET finishers = EXCLUDED.finishers
+				RETURNING id
 				""",
 				(event_id, distance_km, finishers),
 			)
-			inserted_count += 1
+			modality_id = cur.fetchone()[0]
+			modality_ids.append(modality_id)
 
-		return inserted_count
+		return modality_ids
+	
+	def _create_extraction_job(
+		self,
+		cur,
+		event_id: int,
+		modality_ids: list[int],
+		genders: list[str],
+	) -> None:
+		if not modality_ids:
+			return
 
-	def store_event(self, event: dict[str, Any]) -> bool:
+		cur.execute(
+			"""
+			INSERT INTO extraction_job (event_id)
+			VALUES (%s)
+			ON CONFLICT (event_id) DO NOTHING
+			RETURNING id
+			""",
+			(event_id,),
+		)
+		row = cur.fetchone()
+		if not row:
+			return
+		job_id = row[0]
+
+		for modality_id in modality_ids:
+			for gender in genders:
+				cur.execute(
+					"""
+					INSERT INTO extraction_task (job_id, modality_id, gender)
+					VALUES (%s, %s, %s)
+					ON CONFLICT (job_id, modality_id, gender) DO NOTHING
+					""",
+					(job_id, modality_id, gender),
+				)	
+
+	def store_event(self, event: dict[str, Any], genders: list[str] = None) -> bool:
 		slug = (event.get("slug") or "").strip()
 		if not slug:
-			logger.warning("Evento ignorado: slug ausente")
+			logger.warning("Event ignored: slug missing")
 			return False
 
 		hash_slug = self.build_slug_hash(slug)
+		genders = genders or ["M", "F"]
 
 		with self.db.cursor() as cur:
 			if self._event_hash_exists(cur, hash_slug):
-				logger.info("Evento já existe (hash_slug=%s). Inserção ignorada.", hash_slug)
+				logger.info("Event already exists (hash_slug=%s). Skipped.", hash_slug)
 				return False
 
-			state_id = self._get_or_create_state(cur, event.get("state"))
-			city_id = self._get_or_create_city(cur, event.get("city"), state_id)
-			date_id = self._get_or_create_date(cur, event)
-			event_id = self._insert_event(cur, event, city_id, date_id, hash_slug)
-			modality_count = self._insert_modalities(cur, event_id, event.get("distances"))
+			state_id   = self._get_or_create_state(cur, event.get("state"))
+			city_id    = self._get_or_create_city(cur, event.get("city"), state_id)
+			date_id    = self._get_or_create_date(cur, event)
+			event_id   = self._insert_event(cur, event, city_id, date_id, hash_slug)
+			modality_ids = self._insert_modalities(cur, event_id, event.get("distances"))
 
-		logger.info(
-			"Evento inserido com sucesso: slug=%s hash_slug=%s event_id=%s modalidades=%s",
-			slug,
-			hash_slug,
-			event_id,
-			modality_count,
-		)
+			if modality_ids:
+				self._create_extraction_job(cur, event_id, modality_ids, genders)
+			else:
+				logger.info(
+					"Extraction job not created for slug=%s: no modalities available",
+					slug,
+				)
+
+		logger.info("Event inserted: slug=%s event_id=%s", slug, event_id)
 		return True
-
+	
 	def store_events(self, events: list[dict[str, Any]]) -> dict[str, int]:
 		summary = {"inserted": 0, "skipped": 0}
 
@@ -219,13 +259,13 @@ class EventNameStorage:
 			except Exception as exc:
 				summary["skipped"] += 1
 				logger.exception(
-					"Falha ao persistir evento slug=%s: %s",
+					"Failed to persist event slug=%s: %s",
 					event.get("slug"),
 					exc,
 				)
 
 		logger.info(
-			"Persistência finalizada: %s inseridos, %s ignorados",
+			"Persistence completed: %s inserted, %s skipped",
 			summary["inserted"],
 			summary["skipped"],
 		)
