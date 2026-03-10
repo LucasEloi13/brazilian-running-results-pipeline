@@ -1,8 +1,8 @@
 import time
-import yaml
 import requests
 import logging
 from dataclasses import asdict
+from typing import Iterator
 
 from src.extractors.base import Extractor
 from src.parses.event_name_parser import _has_events, _parse_page
@@ -28,46 +28,54 @@ class EventNameExtractor(Extractor):
         response.raise_for_status()
         return response.text
 
-    def extract(self, pages: int = 1, **kwargs) -> list[dict]:
-        all_events: list[dict] = []
-        logger.info(f"Starting extraction of {pages} pages")
-        for page_num in range(0, pages):
+    def iter_events(self, pages: int | None = 1, use_full: bool = False) -> Iterator[dict]:
+        page_num = 0
+        total_events = 0
+
+        if use_full:
+            logger.info("Starting full extraction")
+        else:
+            logger.info("Starting extraction of %s pages", pages)
+
+        while True:
+            if not use_full and pages is not None and page_num >= pages:
+                break
+
             try:
                 html = self._fetch_page(page_num)
             except requests.HTTPError as exc:
-                logger.error(f"Failed fetching page {page_num}: {exc}")
+                logger.error("Failed fetching page %s: %s", page_num, exc)
                 break
-            
-            if not _has_events(html):
-                logger.info(f"Page {page_num} has no events. Stopping.")
-                break
-            
-            events = _parse_page(html, self.base_url)
-            all_events.extend(asdict(e) for e in events)
 
-            logger.info(f"Page {page_num} extracted {len(events)} events (total={len(all_events)})")
-            if page_num < pages - 1:
+            if not _has_events(html):
+                logger.info("Page %s has no events. Stopping.", page_num)
+                break
+
+            events = _parse_page(html, self.base_url)
+            page_payload = [asdict(e) for e in events]
+            total_events += len(page_payload)
+            logger.info(
+                "Page %s extracted %s events (total=%s)",
+                page_num,
+                len(page_payload),
+                total_events,
+            )
+
+            for event in page_payload:
+                yield event
+
+            page_num += 1
+
+            if self.request_delay > 0:
                 time.sleep(self.request_delay)
-        logger.info(f"Extraction completed: {len(all_events)} events extracted")
-        return all_events
+
+        if use_full:
+            logger.info("Full extraction completed: %s events extracted", total_events)
+        else:
+            logger.info("Extraction completed: %s events extracted", total_events)
+
+    def extract(self, pages: int = 1, **kwargs) -> list[dict]:
+        return list(self.iter_events(pages=pages, use_full=False))
 
     def extract_full(self) -> list[dict]:
-        import time
-        all_events: list[dict] = []
-        page_num = 0
-        
-        logger.info(f"Starting full extraction")
-        while True:            
-            html = self._fetch_page(page_num)
-            
-            if not _has_events(html):
-                logger.info(f"Page {page_num} has no events. Stopping.")
-                break
-            
-            events = _parse_page(html, self.base_url)
-            all_events.extend(asdict(e) for e in events)
-            logger.info(f"Page {page_num} extracted {len(events)} events (total={len(all_events)})")
-            page_num += 1
-            time.sleep(self.request_delay)
-        logger.info(f"Full extraction completed: {len(all_events)} events extracted")
-        return all_events
+        return list(self.iter_events(use_full=True))

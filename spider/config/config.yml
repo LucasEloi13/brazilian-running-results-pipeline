@@ -10,3 +10,10 @@ logging:
   log_dir: logs
   log_filename: app.log
 
+pipeline:
+  extraction_mode: paged
+  pages: 10
+  batch_size: 500
+  genders:
+    - M
+    - F

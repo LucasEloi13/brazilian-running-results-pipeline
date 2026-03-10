@@ -1,5 +1,5 @@
 import os
-import psycopg
+import psycopg2
 from dotenv import load_dotenv
 from contextlib import contextmanager
 
@@ -26,8 +26,8 @@ class PostgresConnection:
                 f"password={os.getenv('DB_PASSWORD')}"
             )
             try:
-                self._conn = psycopg.connect(conn_str, connect_timeout=timeout)
-            except Exception as exc:  # psycopg.OperationalError or others
+                self._conn = psycopg2.connect(conn_str, connect_timeout=timeout)
+            except Exception as exc:  # psycopg2.OperationalError or others
                 # fail fast with informative message
                 raise RuntimeError(
                     f"Não foi possível conectar ao banco após {timeout}s: {exc}"
