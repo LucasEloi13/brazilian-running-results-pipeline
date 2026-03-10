@@ -7,3 +7,6 @@ __pycache__/
 spider/logs/app.log
 
 .idea/
+
+# https://openresults.run/evento/2026-mulheres-que-inspiram/?modalidade=5%20KM&genero=F#resultado
+# https://openresults.run/evento/2026-mulheres-que-inspiram/?modalidade=5k&genero=F#resultado

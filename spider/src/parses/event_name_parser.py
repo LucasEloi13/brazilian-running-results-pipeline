@@ -17,8 +17,6 @@ class EventName:
     date: Optional[str] 
     city: Optional[str]
     state: Optional[str]
-    total_finishers: Optional[int]
-    distances: Optional[list]
 
 
 MONTH_MAP = {
@@ -37,36 +35,9 @@ def _format_date(year: Optional[int], month: Optional[int], day: Optional[int]) 
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
-def _parse_int(s: Optional[str]) -> Optional[int]:
-    """Pull an integer from text or a regex match.
-
-    The original callers sometimes passed the result of
-    ``re.search``. Accept either a string or a ``re.Match`` so that
-    callers don't need to unwrap groups manually.  Returns ``None`` if
-    the input is falsy or no number can be extracted.
-    """
-    if not s:
-        return None
-    if isinstance(s, re.Match):
-        # use first group if available
-        try:
-            s = s.group(1)
-        except Exception:
-            return None
-    m = re.search(r"([\d.]+)", s)
-    if not m:
-        return None
-    try:
-        return int(m.group(1).replace(".", ""))
-    except ValueError:
-        return None
-
-
 def _has_events(html: str) -> bool:
     return bool(re.search(r'href="/evento/', html))
 
-
-# helpers used by ``_parse_page``
 
 def _parse_slug(href: str) -> str:
     return href.strip("/").split("/")[-1]
@@ -107,10 +78,9 @@ def _parse_day_month(a) -> tuple[Optional[int], Optional[str], Optional[int]]:
     return day, month_abbr, month
 
 
-def _parse_location_and_finishers(a) -> tuple[Optional[str], Optional[str], Optional[int]]:
+def _parse_location(a) -> tuple[Optional[str], Optional[str]]:
     city = None
     state = None
-    total_finishers = None
     pinfo = a.select_one("p.h6.mb-1.small")
     if pinfo:
         txt = _norm(pinfo.get_text(" "))
@@ -119,25 +89,7 @@ def _parse_location_and_finishers(a) -> tuple[Optional[str], Optional[str], Opti
         if loc:
             city = _norm(loc.group(1))
             state = loc.group(2)
-        match = re.search(r"\|\s*([\d.]+)\s*concluintes", txt)
-        if match:
-            total_finishers = _parse_int(match.group(1))
-    return city, state, total_finishers
-
-
-def _parse_distances(a) -> Optional[list[dict]]:
-    distances: list[dict] = []
-    for d in a.select("div.kms"):
-        dtxt = _norm(d.get_text(" "))
-        km_match = re.search(r"\b(\d+)\s*k\b", dtxt.lower())
-        if not km_match:
-            continue
-        dist_finishers = None
-        match = re.search(r"\|\s*([\d.]+)\s*concluintes", dtxt)
-        if match:
-            dist_finishers = _parse_int(match.group(1))
-        distances.append({"km": km_match.group(1), "finishers": dist_finishers})
-    return distances or None
+    return city, state
 
 
 
@@ -157,8 +109,7 @@ def _parse_page(html: str, base_url: str) -> list[EventName]:
         name = _parse_name(a)
         year = _parse_year(a)
         day, month_abbr, month = _parse_day_month(a)
-        city, state, total_finishers = _parse_location_and_finishers(a)
-        distances = _parse_distances(a)
+        city, state = _parse_location(a)
 
         events.append(EventName(
             url=full_url,
@@ -171,8 +122,6 @@ def _parse_page(html: str, base_url: str) -> list[EventName]:
             date=_format_date(year, month, day),
             city=city,
             state=state,
-            total_finishers=total_finishers,
-            distances=distances,
         ))
 
     return events

@@ -146,7 +146,7 @@ class EventNameStorage:
 		self._bounded_set(self._date_cache, event_date, date_id)
 		return date_id
 
-	def _bulk_insert_events(self, cur, rows: list[tuple[str, str, str, int, int]]) -> dict[str, int]:
+	def _bulk_upsert_events(self, cur, rows: list[tuple[str, str, str, int, int]]) -> dict[str, int]:
 		if not rows:
 			return {}
 
@@ -155,7 +155,11 @@ class EventNameStorage:
 			"""
 			INSERT INTO event (slug, hash_slug, name, city_id, date_id)
 			VALUES %s
-			ON CONFLICT (hash_slug) DO NOTHING
+			ON CONFLICT (hash_slug) DO UPDATE
+				SET slug = EXCLUDED.slug,
+					name = EXCLUDED.name,
+					city_id = EXCLUDED.city_id,
+					date_id = EXCLUDED.date_id
 			RETURNING id, hash_slug
 			""",
 			rows,
@@ -163,28 +167,6 @@ class EventNameStorage:
 		)
 
 		return {hash_slug: event_id for event_id, hash_slug in cur.fetchall()}
-
-	def _bulk_insert_modalities(self, cur, rows: list[tuple[int, int, int | None]]) -> dict[tuple[int, int], int]:
-		if not rows:
-			return {}
-
-		execute_values(
-			cur,
-			"""
-			INSERT INTO modality (event_id, distance, finishers)
-			VALUES %s
-			ON CONFLICT (event_id, distance) DO UPDATE
-				SET finishers = EXCLUDED.finishers
-			RETURNING id, event_id, distance
-			""",
-			rows,
-			page_size=1000,
-		)
-
-		return {
-			(event_id, distance): modality_id
-			for modality_id, event_id, distance in cur.fetchall()
-		}
 
 	def _bulk_insert_jobs(self, cur, rows: list[tuple[int]]) -> dict[int, int]:
 		if not rows:
@@ -204,27 +186,10 @@ class EventNameStorage:
 
 		return {event_id: job_id for job_id, event_id in cur.fetchall()}
 
-	def _bulk_insert_tasks(self, cur, rows: list[tuple[int, int, str]]) -> None:
-		if not rows:
-			return
-
-		execute_values(
-			cur,
-			"""
-			INSERT INTO extraction_task (job_id, modality_id, gender)
-			VALUES %s
-			ON CONFLICT (job_id, modality_id, gender) DO NOTHING
-			""",
-			rows,
-			page_size=1000,
-		)
-
-	def store_events(self, events: list[dict[str, Any]], genders: list[str] | None = None) -> dict[str, int]:
-		active_genders = genders or ["M", "F"]
+	def store_events(self, events: list[dict[str, Any]]) -> dict[str, int]:
 		summary = {"inserted": 0, "skipped": 0}
 
 		event_rows: list[tuple[str, str, str, int, int]] = []
-		event_context: dict[str, dict[str, Any]] = {}
 
 		with self.db.cursor() as cur:
 			for event in events:
@@ -248,57 +213,18 @@ class EventNameStorage:
 						date_id,
 					)
 				)
-				event_context[hash_slug] = event
 
-			event_map = self._bulk_insert_events(cur, event_rows)
+			event_map = self._bulk_upsert_events(cur, event_rows)
 			summary["inserted"] += len(event_map)
-			summary["skipped"] += len(event_rows) - len(event_map)
-
-			modality_rows: list[tuple[int, int, int | None]] = []
-			for hash_slug, event in event_context.items():
-				event_id = event_map.get(hash_slug)
-				if not event_id:
-					continue
-
-				for distance in (event.get("distances") or []):
-					km_raw = distance.get("km")
-					if km_raw is None:
-						continue
-
-					try:
-						distance_km = int(km_raw)
-					except (TypeError, ValueError):
-						continue
-
-					finishers_raw = distance.get("finishers")
-					try:
-						finishers = int(finishers_raw) if finishers_raw is not None else None
-					except (TypeError, ValueError):
-						finishers = None
-
-					modality_rows.append((event_id, distance_km, finishers))
-
-			modality_map = self._bulk_insert_modalities(cur, modality_rows)
+			summary["skipped"] += max(0, len(event_rows) - len(event_map))
 
 			job_rows = [(event_id,) for event_id in event_map.values()]
 			job_map = self._bulk_insert_jobs(cur, job_rows)
 
-			task_rows: list[tuple[int, int, str]] = []
-			for (event_id, _distance), modality_id in modality_map.items():
-				job_id = job_map.get(event_id)
-				if not job_id:
-					continue
-
-				for gender in active_genders:
-					task_rows.append((job_id, modality_id, gender))
-
-			self._bulk_insert_tasks(cur, task_rows)
-
 		logger.info(
-			"Bulk persistence completed: inserted_events=%s skipped_events=%s modalities=%s tasks=%s",
+			"Bulk persistence completed: inserted_events=%s skipped_events=%s jobs=%s",
 			summary["inserted"],
 			summary["skipped"],
-			len(modality_map),
-			len(task_rows),
+			len(job_map),
 		)
 		return summary

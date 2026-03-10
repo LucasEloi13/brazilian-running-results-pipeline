@@ -12,8 +12,20 @@ logging:
 
 pipeline:
   extraction_mode: paged
-  pages: 10
+  pages: 5
   batch_size: 500
-  genders:
-    - M
-    - F
+
+extact_event_result:
+  request_timeout_s: 60
+  request_delay_s: 2
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+
+result_pipeline:
+  batch_size: 3
+  max_attempts_total: 15
+
+s3:
+  bucket: "running-results-023546157022"
+  region: "us-east-1"
+  results_prefix: "results"
+  profile_name: "eloi-admin"

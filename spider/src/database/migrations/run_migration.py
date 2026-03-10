@@ -40,20 +40,91 @@ def _split_sql_statements(sql_script: str) -> list[str]:
     buffer: list[str] = []
     in_single_quote = False
     in_double_quote = False
+    in_line_comment = False
+    in_block_comment = False
+    dollar_quote_tag: str | None = None
+    index = 0
 
-    for char in sql_script:
+    while index < len(sql_script):
+        char = sql_script[index]
+        next_char = sql_script[index + 1] if index + 1 < len(sql_script) else ""
+
+        if in_line_comment:
+            buffer.append(char)
+            if char == "\n":
+                in_line_comment = False
+            index += 1
+            continue
+
+        if in_block_comment:
+            buffer.append(char)
+            if char == "*" and next_char == "/":
+                buffer.append(next_char)
+                in_block_comment = False
+                index += 2
+                continue
+            index += 1
+            continue
+
+        if dollar_quote_tag:
+            if sql_script.startswith(dollar_quote_tag, index):
+                buffer.append(dollar_quote_tag)
+                index += len(dollar_quote_tag)
+                dollar_quote_tag = None
+                continue
+
+            buffer.append(char)
+            index += 1
+            continue
+
+        if not in_single_quote and not in_double_quote:
+            if char == "-" and next_char == "-":
+                buffer.append(char)
+                buffer.append(next_char)
+                in_line_comment = True
+                index += 2
+                continue
+
+            if char == "/" and next_char == "*":
+                buffer.append(char)
+                buffer.append(next_char)
+                in_block_comment = True
+                index += 2
+                continue
+
+            if char == "$":
+                closing_index = sql_script.find("$", index + 1)
+                if closing_index != -1:
+                    candidate_tag = sql_script[index : closing_index + 1]
+                    tag_body = candidate_tag[1:-1]
+                    if tag_body.replace("_", "").isalnum() or candidate_tag == "$$":
+                        buffer.append(candidate_tag)
+                        dollar_quote_tag = candidate_tag
+                        index = closing_index + 1
+                        continue
+
         if char == "'" and not in_double_quote:
             in_single_quote = not in_single_quote
-        elif char == '"' and not in_single_quote:
+            buffer.append(char)
+            index += 1
+            continue
+
+        if char == '"' and not in_single_quote:
             in_double_quote = not in_double_quote
+            buffer.append(char)
+            index += 1
+            continue
 
         if char == ";" and not in_single_quote and not in_double_quote:
             statement = "".join(buffer).strip()
             if statement:
                 statements.append(statement)
             buffer = []
-        else:
-            buffer.append(char)
+            index += 1
+            continue
+
+        buffer.append(char)
+        index += 1
 
     tail = "".join(buffer).strip()
     if tail:
