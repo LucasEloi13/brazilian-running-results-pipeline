@@ -138,12 +138,29 @@ class EventResultStorage:
             return {raw_category_name: modality_id for modality_id, raw_category_name in cur.fetchall()}
 
     def _bulk_upsert_tasks(self, job_id: int, modality_map: dict[str, int], targets: list[dict[str, Any]]) -> int:
-        rows: list[tuple[int, int, str, str]] = []
+        """Insert or update a batch of extraction tasks.
+
+        The unique key in the table is (job_id, modality_id, gender). When the
+        list of targets contains duplicate combinations we must collapse them
+        before issuing the INSERT, otherwise Postgres will raise the
+        "ON CONFLICT DO UPDATE command cannot affect row a second time" error
+        that was observed in production.  We keep the last discovered
+        ``source_url`` for a given pair.
+        """
+
+        # build a map keyed by (modality_id, gender) to ensure uniqueness
+        task_map: dict[tuple[int, str], str] = {}
         for target in targets:
-            modality_id = modality_map.get(str(target["raw_category_name"]))
+            modality_id = modality_map.get(str(target.get("raw_category_name")))
             if not modality_id:
                 continue
-            rows.append((job_id, modality_id, str(target["gender"]), str(target["source_url"])))
+            gender = str(target.get("gender"))
+            source_url = str(target.get("source_url"))
+            task_map[(modality_id, gender)] = source_url
+
+        rows: list[tuple[int, int, str, str]] = []
+        for (modality_id, gender), source_url in task_map.items():
+            rows.append((job_id, modality_id, gender, source_url))
 
         if not rows:
             return 0

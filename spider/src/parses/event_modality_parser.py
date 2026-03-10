@@ -28,17 +28,24 @@ def _parse_distance_km(raw_category_name: str) -> float | None:
 
 def parse_modality_targets(html: str, base_url: str) -> list[dict[str, Any]]:
     soup = BeautifulSoup(html, "html.parser")
-    targets: list[dict[str, Any]] = []
-    seen_urls: set[str] = set()
+    # map keyed by (raw_category_name, gender) -> record
+    unique: dict[tuple[str, str], dict[str, Any]] = {}
+
+    # select only links that explicitly include both parameters; we'll drop
+    # card-level "modalidade only" anchors because the extractor needs
+    # gender-specific URLs later.
+    from urllib.parse import quote
 
     for anchor in soup.select('a[href*="/evento/"][href*="modalidade="][href*="genero="]'):
         href = (anchor.get("href") or "").strip()
         if not href:
             continue
 
+        # join with base then percent-encode any illegal characters (spaces, etc.)
         full_url = urljoin(base_url, href)
-        if full_url in seen_urls:
-            continue
+        # spaces often appear in modalidade values; encode them so requests
+        # library won't choke and the URL is valid for scraping/storage.
+        full_url = quote(full_url, safe=":/?&=%")
 
         parsed = urlparse(full_url)
         query = parse_qs(parsed.query)
@@ -50,15 +57,15 @@ def parse_modality_targets(html: str, base_url: str) -> list[dict[str, Any]]:
         if not raw_category_name or gender not in {"F", "M"} or distance_km is None:
             continue
 
-        seen_urls.add(full_url)
-        targets.append(
-            {
+        key = (raw_category_name, gender)
+        # keep the first seen URL; subsequent duplicates are ignored
+        if key not in unique:
+            unique[key] = {
                 "source_url": full_url,
                 "raw_category_name": raw_category_name,
                 "distance_km": distance_km,
                 "is_pcd": is_pcd,
                 "gender": gender,
             }
-        )
 
-    return targets
+    return list(unique.values())

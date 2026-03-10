@@ -11,7 +11,7 @@ logging:
   log_filename: app.log
 
 pipeline:
-  extraction_mode: paged
+  extraction_mode: full
   pages: 5
   batch_size: 500
 
