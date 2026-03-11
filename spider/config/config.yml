@@ -17,12 +17,13 @@ pipeline:
 
 extact_event_result:
   request_timeout_s: 60
-  request_delay_s: 2
+  request_delay_s: 1.5
   user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 
 result_pipeline:
-  batch_size: 3
-  max_attempts_total: 15
+  batch_size: 5
+  task_workers: 5
+  max_attempts_total: 3
 
 s3:
   bucket: "running-results-023546157022"

@@ -62,3 +62,6 @@ class EventResultExtractor(Extractor):
         if not url:
             raise ValueError("extract(url=...) requires a result URL")
         return self.extract_results(url)
+
+    def close(self) -> None:
+        self._session.close()

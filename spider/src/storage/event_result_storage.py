@@ -1,4 +1,5 @@
 import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import io
 import logging
 import re
@@ -24,6 +25,9 @@ class EventResultStorage:
         self.batch_size = int(result_cfg.get("batch_size", 5))
         if self.batch_size <= 0:
             self.batch_size = 5
+        self.task_workers = int(result_cfg.get("task_workers", self.batch_size))
+        if self.task_workers <= 0:
+            self.task_workers = 1
         self.max_attempts_total = int(result_cfg.get("max_attempts_total", 15))
 
         self.s3_bucket = s3_cfg.get("bucket")
@@ -75,8 +79,33 @@ class EventResultStorage:
         with self.db.cursor() as cur:
             cur.execute(
                 """
+                WITH candidate_tasks AS (
+                    SELECT t.id
+                    FROM extraction_task t
+                    WHERE t.job_id = ANY(%s)
+                      AND t.status IN ('pending', 'failed')
+                      AND t.attempts < %s
+                    ORDER BY t.attempts ASC, t.last_attempt_at NULLS FIRST, t.id
+                    FOR UPDATE SKIP LOCKED
+                ),
+                claimed_tasks AS (
+                    UPDATE extraction_task t
+                    SET status = 'in_progress',
+                        attempts = t.attempts + 1,
+                        last_attempt_at = NOW(),
+                        error_msg = NULL
+                    FROM candidate_tasks c
+                    WHERE t.id = c.id
+                    RETURNING
+                        t.id AS task_id,
+                        t.job_id,
+                        t.modality_id,
+                        t.gender,
+                        t.source_url,
+                        t.attempts
+                )
                 SELECT
-                    t.id AS task_id,
+                    t.task_id,
                     t.job_id,
                     t.modality_id,
                     t.gender,
@@ -89,16 +118,13 @@ class EventResultStorage:
                     m.raw_category_name,
                     c.name AS city_name,
                     s.abbreviation AS state_abbr
-                FROM extraction_task t
+                FROM claimed_tasks t
                 JOIN extraction_job j ON j.id = t.job_id
                 JOIN modality m ON m.id = t.modality_id
                 JOIN event e ON e.id = j.event_id
                 JOIN city c ON c.id = e.city_id
                 JOIN state s ON s.id = c.state_id
-                WHERE t.job_id = ANY(%s)
-                  AND t.status IN ('pending', 'failed')
-                  AND t.attempts < %s
-                ORDER BY t.attempts ASC, t.last_attempt_at NULLS FIRST, t.id
+                ORDER BY t.attempts ASC, t.task_id
                 """,
                 (job_ids, self.max_attempts_total),
             )
@@ -244,19 +270,6 @@ class EventResultStorage:
                 (s3_path, row_count, task_id),
             )
 
-    def mark_attempt(self, task_id: int) -> None:
-        """Increments attempts and sets last_attempt_at before trying to scrape."""
-        with self.db.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE extraction_task
-                SET attempts = attempts + 1,
-                    last_attempt_at = NOW()
-                WHERE id = %s
-                """,
-                (task_id,),
-            )
-
     def mark_task_failure(self, task_id: int, error_msg: str) -> None:
         with self.db.cursor() as cur:
             cur.execute(
@@ -299,6 +312,12 @@ class EventResultStorage:
                             WHERE t.job_id = j.id
                               AND t.status = 'pending'
                         ) THEN 'pending'
+                                                WHEN EXISTS (
+                                                        SELECT 1
+                                                        FROM extraction_task t
+                                                        WHERE t.job_id = j.id
+                                                            AND t.status = 'in_progress'
+                                                ) THEN 'pending'
                         WHEN NOT EXISTS (
                             SELECT 1
                             FROM extraction_task t
@@ -324,6 +343,43 @@ class EventResultStorage:
         for i in range(0, len(tasks), size):
             yield tasks[i : i + size]
 
+    def _build_task_extractor(self, extractor):
+        return extractor.__class__(self.config)
+
+    def _process_task(self, extractor, task: dict[str, Any]) -> dict[str, int | str]:
+        task_id = int(task["task_id"])
+        job_id = int(task["job_id"])
+        task_extractor = None
+
+        try:
+            task_extractor = self._build_task_extractor(extractor)
+            rows = task_extractor.extract_results(task["source_url"])
+
+            s3_path = self.upload_to_s3(task=task, rows=rows)
+            if not s3_path:
+                raise RuntimeError("S3 upload skipped or no rows parsed; configure bucket and verify source HTML")
+
+            self.mark_task_success(task_id, row_count=len(rows), s3_path=s3_path)
+            self.refresh_job_status(job_id)
+
+            logger.info("Task completed: task_id=%s rows=%s s3_path=%s", task_id, len(rows), s3_path)
+            return {"status": "completed", "row_count": len(rows)}
+
+        except Exception as exc:
+            error_msg = str(exc)
+            try:
+                self.mark_task_failure(task_id, error_msg)
+                self.refresh_job_status(job_id)
+            except Exception as persist_exc:
+                logger.error("Failed to persist task failure: task_id=%s error=%s", task_id, persist_exc)
+
+            logger.error("Task failed: task_id=%s error=%s", task_id, error_msg)
+            return {"status": "failed", "row_count": 0}
+
+        finally:
+            if task_extractor and hasattr(task_extractor, "close"):
+                task_extractor.close()
+
     def process_queue(self, extractor) -> dict[str, int]:
         jobs = self.fetch_actionable_jobs()
         summary = {
@@ -335,7 +391,12 @@ class EventResultStorage:
             "uploaded_rows": 0,
         }
 
-        logger.info("Jobs to process: %s | batch_size=%s", len(jobs), self.batch_size)
+        logger.info(
+            "Jobs to process: %s | batch_size=%s | task_workers=%s",
+            len(jobs),
+            self.batch_size,
+            self.task_workers,
+        )
 
         for batch_num, batch in enumerate(self._chunk(jobs, self.batch_size), start=1):
             logger.info("Processing batch %s (%s jobs)", batch_num, len(batch))
@@ -355,33 +416,21 @@ class EventResultStorage:
             tasks = self.fetch_actionable_tasks(batch_job_ids)
             summary["tasks_fetched"] += len(tasks)
 
-            for task in tasks:
-                task_id = int(task["task_id"])
-                job_id = int(task["job_id"])
+            if not tasks:
+                continue
 
-                self.mark_attempt(task_id)
+            max_workers = min(self.task_workers, len(tasks))
+            logger.info("Submitting %s tasks with max_workers=%s", len(tasks), max_workers)
 
-                try:
-                    rows = extractor.extract_results(task["source_url"])
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(self._process_task, extractor, task) for task in tasks]
 
-                    s3_path = self.upload_to_s3(task=task, rows=rows)
-                    if not s3_path:
-                        raise RuntimeError("S3 upload skipped or no rows parsed; configure bucket and verify source HTML")
-
-                    self.mark_task_success(task_id, row_count=len(rows), s3_path=s3_path)
-                    self.refresh_job_status(job_id)
-
-                    summary["completed"] += 1
-                    summary["uploaded_rows"] += len(rows)
-
-                    logger.info("Task completed: task_id=%s rows=%s s3_path=%s", task_id, len(rows), s3_path)
-
-                except Exception as exc:
-                    error_msg = str(exc)
-                    self.mark_task_failure(task_id, error_msg)
-                    self.refresh_job_status(job_id)
-
-                    summary["failed"] += 1
-                    logger.error("Task failed: task_id=%s error=%s", task_id, error_msg)
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result["status"] == "completed":
+                        summary["completed"] += 1
+                        summary["uploaded_rows"] += int(result["row_count"])
+                    else:
+                        summary["failed"] += 1
 
         return summary

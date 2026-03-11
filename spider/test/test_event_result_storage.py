@@ -13,11 +13,18 @@ from src.storage.event_result_storage import EventResultStorage, execute_values
 
 
 class DummyCursor:
+    def __init__(self):
+        self.executed: list[tuple[str, Any]] = []
+        self.description = []
+
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+    def execute(self, query, params=None):
+        self.executed.append((query, params))
 
     def fetchall(self):
         # value may be injected by the fake execute_values
@@ -83,3 +90,47 @@ def test_bulk_upsert_modalities_dedup(monkeypatch):
     result = storage._bulk_upsert_modalities(7, targets)
     assert result == {'A': 123}
     assert captured['rows'] == [(7, 10.0, True, 'A')]
+
+
+def test_fetch_actionable_tasks_claims_in_progress():
+    cursor = DummyCursor()
+    cursor.description = [
+        ("task_id",),
+        ("job_id",),
+        ("modality_id",),
+        ("gender",),
+        ("source_url",),
+        ("attempts",),
+        ("event_id",),
+        ("slug",),
+        ("distance_km",),
+        ("is_pcd",),
+        ("raw_category_name",),
+        ("city_name",),
+        ("state_abbr",),
+    ]
+
+    def fetchall():
+        return [(1, 10, 20, 'M', 'https://example.com', 2, 30, 'event-x', 5.0, False, '5km', 'Cuiaba', 'MT')]
+
+    cursor.fetchall = fetchall
+    storage = EventResultStorage(db=DummyDB(cursor), config={})
+
+    tasks = storage.fetch_actionable_tasks([10])
+
+    assert tasks == [{
+        'task_id': 1,
+        'job_id': 10,
+        'modality_id': 20,
+        'gender': 'M',
+        'source_url': 'https://example.com',
+        'attempts': 2,
+        'event_id': 30,
+        'slug': 'event-x',
+        'distance_km': 5.0,
+        'is_pcd': False,
+        'raw_category_name': '5km',
+        'city_name': 'Cuiaba',
+        'state_abbr': 'MT',
+    }]
+    assert "status = 'in_progress'" in cursor.executed[0][0]

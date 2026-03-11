@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS extraction_task (
     gender          CHAR(1)     NOT NULL CHECK (gender IN ('M', 'F')),
     source_url      TEXT        NOT NULL,
     status          VARCHAR(20) NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'completed', 'failed')),
+                    CHECK (status IN ('pending', 'in_progress', 'completed', 'failed')),
     s3_path         TEXT,
     redshift_loaded BOOLEAN     NOT NULL DEFAULT FALSE,
     row_count       INT,
@@ -189,6 +189,10 @@ UPDATE extraction_task
 SET source_url = ''
 WHERE source_url IS NULL;
 ALTER TABLE extraction_task ALTER COLUMN source_url SET NOT NULL;
+ALTER TABLE extraction_task DROP CONSTRAINT IF EXISTS extraction_task_status_check;
+ALTER TABLE extraction_task
+    ADD CONSTRAINT extraction_task_status_check
+    CHECK (status IN ('pending', 'in_progress', 'completed', 'failed'));
 
 CREATE INDEX idx_job_status       ON extraction_job(status);
 CREATE INDEX idx_task_status      ON extraction_task(status);
