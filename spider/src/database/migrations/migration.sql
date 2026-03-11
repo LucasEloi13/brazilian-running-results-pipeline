@@ -62,19 +62,52 @@ CREATE TABLE IF NOT EXISTS event (
 
 -- -----------------------------------------------------------------------------
 -- Modality (Modalidade)
--- Cada corrida pode ter múltiplas distâncias (5, 10, 21, 42...)
--- distance armazena só o número em km, sem o "K"
--- finishers é o total de finishers naquela modalidade
+-- Descoberta a partir da página do evento na etapa de scrape.
+-- distance_km é a versão normalizada; raw_category_name preserva o nome original.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS modality (
-    id          SERIAL      PRIMARY KEY,
-    event_id     INT         NOT NULL,
-    distance    SMALLINT    NOT NULL    CHECK (distance > 0),
-    finishers   INT                     CHECK (finishers >= 0),
+    id                  SERIAL          PRIMARY KEY,
+    event_id            INT             NOT NULL,
+    distance_km         NUMERIC(6,2)    NOT NULL    CHECK (distance_km > 0),
+    is_pcd              BOOLEAN         NOT NULL    DEFAULT FALSE,
+    raw_category_name   VARCHAR(255)    NOT NULL,
 
     CONSTRAINT fk_modality_event     FOREIGN KEY (event_id) REFERENCES event (id),
-    CONSTRAINT uq_modality_event     UNIQUE (event_id, distance)
+    CONSTRAINT uq_modality_event_raw UNIQUE (event_id, raw_category_name)
 );
+
+ALTER TABLE modality ADD COLUMN IF NOT EXISTS distance_km NUMERIC(6,2);
+ALTER TABLE modality ADD COLUMN IF NOT EXISTS is_pcd BOOLEAN;
+ALTER TABLE modality ADD COLUMN IF NOT EXISTS raw_category_name VARCHAR(255);
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'modality' AND column_name = 'distance'
+    ) THEN
+        EXECUTE 'UPDATE modality SET distance_km = COALESCE(distance_km, distance::NUMERIC(6,2)) WHERE distance_km IS NULL';
+    END IF;
+END $$;
+
+UPDATE modality
+SET is_pcd = FALSE
+WHERE is_pcd IS NULL;
+
+UPDATE modality
+SET raw_category_name = CONCAT(TRIM(TRAILING '.00' FROM TRIM(TRAILING '0' FROM distance_km::TEXT)), ' KM')
+WHERE raw_category_name IS NULL;
+
+ALTER TABLE modality ALTER COLUMN distance_km SET NOT NULL;
+ALTER TABLE modality ALTER COLUMN is_pcd SET NOT NULL;
+ALTER TABLE modality ALTER COLUMN is_pcd SET DEFAULT FALSE;
+ALTER TABLE modality ALTER COLUMN raw_category_name SET NOT NULL;
+ALTER TABLE modality DROP CONSTRAINT IF EXISTS uq_modality_event;
+ALTER TABLE modality DROP CONSTRAINT IF EXISTS uq_modality_event_raw;
+ALTER TABLE modality ADD CONSTRAINT uq_modality_event_raw UNIQUE (event_id, raw_category_name);
+ALTER TABLE modality DROP COLUMN IF EXISTS finishers;
+ALTER TABLE modality DROP COLUMN IF EXISTS distance;
 
 -- -----------------------------------------------------------------------------
 -- Category (Categoria)
@@ -112,3 +145,58 @@ CREATE TABLE IF NOT EXISTS result (
     -- Evita duplicatas na reingestão
     CONSTRAINT uq_result UNIQUE (modality_id, category_id, bib_number)
 );
+
+-- -----------------------------------------------------------------------------
+-- Extraction Job
+-- 1 job por evento — controle macro
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS extraction_job (
+    id          SERIAL      PRIMARY KEY,
+    event_id    INT         NOT NULL REFERENCES event(id),
+    status      VARCHAR(20) NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'completed', 'failed')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_job_event UNIQUE (event_id)
+);
+
+-- -----------------------------------------------------------------------------
+-- Extraction Task
+-- 1 task por target descoberto (modality_id x gender)
+-- source_url guarda o link exato descoberto no HTML.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS extraction_task (
+    id              SERIAL      PRIMARY KEY,
+    job_id          INT         NOT NULL REFERENCES extraction_job(id),
+    modality_id     INT         NOT NULL REFERENCES modality(id),
+    gender          CHAR(1)     NOT NULL CHECK (gender IN ('M', 'F')),
+    source_url      TEXT        NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'in_progress', 'completed', 'failed')),
+    s3_path         TEXT,
+    redshift_loaded BOOLEAN     NOT NULL DEFAULT FALSE,
+    row_count       INT,
+    attempts        SMALLINT    NOT NULL DEFAULT 0,
+    last_attempt_at TIMESTAMPTZ,
+    error_msg       TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_task UNIQUE (job_id, modality_id, gender)
+);
+
+ALTER TABLE extraction_task ADD COLUMN IF NOT EXISTS source_url TEXT;
+UPDATE extraction_task
+SET source_url = ''
+WHERE source_url IS NULL;
+ALTER TABLE extraction_task ALTER COLUMN source_url SET NOT NULL;
+ALTER TABLE extraction_task DROP CONSTRAINT IF EXISTS extraction_task_status_check;
+ALTER TABLE extraction_task
+    ADD CONSTRAINT extraction_task_status_check
+    CHECK (status IN ('pending', 'in_progress', 'completed', 'failed'));
+
+CREATE INDEX idx_job_status       ON extraction_job(status);
+CREATE INDEX idx_task_status      ON extraction_task(status);
+CREATE INDEX idx_task_pending     ON extraction_task(status)
+    WHERE status IN ('pending', 'failed');
+CREATE INDEX idx_task_s3_pending  ON extraction_task(redshift_loaded)
+    WHERE status = 'completed' AND redshift_loaded = FALSE;

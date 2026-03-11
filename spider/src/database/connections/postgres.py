@@ -1,22 +1,18 @@
 import os
-import psycopg
+import threading
+import psycopg2
 from dotenv import load_dotenv
 from contextlib import contextmanager
 
 load_dotenv(override=True)
 
 class PostgresConnection:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(PostgresConnection, cls).__new__(cls)
-            cls._instance._conn = None
-        return cls._instance
+    def __init__(self):
+        self._local = threading.local()
 
     def _get_connection(self):
-        # Reuse existing connection if open
-        if self._conn is None or self._conn.closed:
+        conn = getattr(self._local, "_conn", None)
+        if conn is None or conn.closed:
             timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "15"))
             conn_str = (
                 f"host={os.getenv('DB_HOST')} "
@@ -26,13 +22,14 @@ class PostgresConnection:
                 f"password={os.getenv('DB_PASSWORD')}"
             )
             try:
-                self._conn = psycopg.connect(conn_str, connect_timeout=timeout)
-            except Exception as exc:  # psycopg.OperationalError or others
+                conn = psycopg2.connect(conn_str, connect_timeout=timeout)
+                self._local._conn = conn
+            except Exception as exc:  # psycopg2.OperationalError or others
                 # fail fast with informative message
                 raise RuntimeError(
                     f"Não foi possível conectar ao banco após {timeout}s: {exc}"
                 )
-        return self._conn
+        return conn
 
     @contextmanager
     def cursor(self):
@@ -46,6 +43,7 @@ class PostgresConnection:
             raise e
 
     def close(self):
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        conn = getattr(self._local, "_conn", None)
+        if conn:
+            conn.close()
+            self._local._conn = None
