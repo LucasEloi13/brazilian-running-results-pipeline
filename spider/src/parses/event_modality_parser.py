@@ -28,12 +28,9 @@ def _parse_distance_km(raw_category_name: str) -> float | None:
 
 def parse_modality_targets(html: str, base_url: str) -> list[dict[str, Any]]:
     soup = BeautifulSoup(html, "html.parser")
-    # map keyed by (raw_category_name, gender) -> record
+
     unique: dict[tuple[str, str], dict[str, Any]] = {}
 
-    # select only links that explicitly include both parameters; we'll drop
-    # card-level "modalidade only" anchors because the extractor needs
-    # gender-specific URLs later.
     from urllib.parse import quote
 
     for anchor in soup.select('a[href*="/evento/"][href*="modalidade="][href*="genero="]'):
@@ -41,10 +38,7 @@ def parse_modality_targets(html: str, base_url: str) -> list[dict[str, Any]]:
         if not href:
             continue
 
-        # join with base then percent-encode any illegal characters (spaces, etc.)
         full_url = urljoin(base_url, href)
-        # spaces often appear in modalidade values; encode them so requests
-        # library won't choke and the URL is valid for scraping/storage.
         full_url = quote(full_url, safe=":/?&=%")
 
         parsed = urlparse(full_url)
@@ -58,7 +52,6 @@ def parse_modality_targets(html: str, base_url: str) -> list[dict[str, Any]]:
             continue
 
         key = (raw_category_name, gender)
-        # keep the first seen URL; subsequent duplicates are ignored
         if key not in unique:
             unique[key] = {
                 "source_url": full_url,

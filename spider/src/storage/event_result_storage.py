@@ -138,17 +138,7 @@ class EventResultStorage:
             return {raw_category_name: modality_id for modality_id, raw_category_name in cur.fetchall()}
 
     def _bulk_upsert_tasks(self, job_id: int, modality_map: dict[str, int], targets: list[dict[str, Any]]) -> int:
-        """Insert or update a batch of extraction tasks.
 
-        The unique key in the table is (job_id, modality_id, gender). When the
-        list of targets contains duplicate combinations we must collapse them
-        before issuing the INSERT, otherwise Postgres will raise the
-        "ON CONFLICT DO UPDATE command cannot affect row a second time" error
-        that was observed in production.  We keep the last discovered
-        ``source_url`` for a given pair.
-        """
-
-        # build a map keyed by (modality_id, gender) to ensure uniqueness
         task_map: dict[tuple[int, str], str] = {}
         for target in targets:
             modality_id = modality_map.get(str(target.get("raw_category_name")))
@@ -191,7 +181,6 @@ class EventResultStorage:
         state = self._slugify(task.get("state_abbr") or "ni")
         city = self._slugify(task.get("city_name") or "nao-informado")
         distance = self._format_distance(task["distance_km"])
-        category = self._slugify(task.get("raw_category_name") or "unknown-category")
         is_pcd = "true" if bool(task.get("is_pcd")) else "false"
         slug = self._slugify(task.get("slug") or "unknown-event")
         gender = (task.get("gender") or "M").upper()
@@ -199,7 +188,7 @@ class EventResultStorage:
 
         return (
             f"{self.s3_prefix}/"
-            f"state={state}/city={city}/modality={distance}/pcd={is_pcd}/category={category}/gender={gender}/event={slug}/"
+            f"state={state}/city={city}/modality={distance}/pcd={is_pcd}/gender={gender}/event={slug}/"
             f"{filename}"
         )
 
