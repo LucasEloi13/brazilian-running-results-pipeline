@@ -66,7 +66,9 @@ class EventResultStorage:
                 JOIN city c ON c.id = e.city_id
                 JOIN state s ON s.id = c.state_id
                 WHERE j.status IN ('pending', 'failed')
-                ORDER BY j.updated_at ASC, j.id
+                ORDER BY CASE WHEN j.status = 'pending' THEN 0 ELSE 1 END,
+                         j.updated_at ASC,
+                         j.id
                 """,
             )
             columns = [desc[0] for desc in cur.description]
@@ -85,7 +87,10 @@ class EventResultStorage:
                     WHERE t.job_id = ANY(%s)
                       AND t.status IN ('pending', 'failed')
                       AND t.attempts < %s
-                    ORDER BY t.attempts ASC, t.last_attempt_at NULLS FIRST, t.id
+                                        ORDER BY CASE WHEN t.status = 'pending' THEN 0 ELSE 1 END,
+                                                         t.attempts ASC,
+                                                         t.last_attempt_at NULLS FIRST,
+                                                         t.id
                     FOR UPDATE SKIP LOCKED
                 ),
                 claimed_tasks AS (
