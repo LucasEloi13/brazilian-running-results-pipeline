@@ -1,26 +1,16 @@
 module "networking" {
   source = "./modules/networking"
 
-  name_suffix = local.name_suffix
-}
-
-module "bastion_ssm" {
-  source = "./modules/bastion_ssm"
-
-  name_suffix = local.name_suffix
-
-  subnet_id        = module.networking.private_subnet_ids[0]
-  ec2_sg_id        = module.networking.ec2_security_group_id
-  instance_profile = module.networking.ec2_instance_profile_name
-
-  depends_on = [module.networking]
+  name_suffix     = local.name_suffix
+  allowed_ip_cidr = var.allowed_ip_cidr
 }
 
 module "rds" {
   source = "./modules/rds"
 
-  identifier      = local.name_suffix
-  master_password = var.rds_master_password
+  identifier          = local.name_suffix
+  master_password     = var.rds_master_password
+  publicly_accessible = true
 
   db_subnet_group_name   = module.networking.db_subnet_group_name
   vpc_security_group_ids = [module.networking.rds_security_group_id]
@@ -63,7 +53,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "running_results" 
 # Data source to get current AWS account ID
 data "aws_caller_identity" "current" {}
 
-output "bastion_instance_id" {
-  description = "Instance ID of the private EC2 used for SSM tunneling"
-  value       = module.bastion_ssm.instance_id
+output "rds_endpoint" {
+  description = "RDS endpoint address"
+  value       = module.rds.endpoint
 }

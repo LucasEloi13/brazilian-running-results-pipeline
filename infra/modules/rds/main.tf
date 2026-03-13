@@ -6,9 +6,9 @@ resource "aws_db_instance" "this" {
   instance_class = "db.t4g.micro"
 
   allocated_storage = 20
-  storage_type       = "gp2"
+  storage_type      = "gp2"
 
-  performance_insights_enabled = true
+  performance_insights_enabled          = true
   performance_insights_retention_period = 7
 
   db_name  = "app"
@@ -17,11 +17,11 @@ resource "aws_db_instance" "this" {
 
   port = 5432
 
-  publicly_accessible     = false
-  db_subnet_group_name    = var.db_subnet_group_name
-  vpc_security_group_ids  = var.vpc_security_group_ids
-  skip_final_snapshot     = true
-  deletion_protection     = false
+  publicly_accessible    = var.publicly_accessible
+  db_subnet_group_name   = var.db_subnet_group_name
+  vpc_security_group_ids = var.vpc_security_group_ids
+  skip_final_snapshot    = true
+  deletion_protection    = false
 }
 
 output "endpoint" {
