@@ -1,0 +1,33 @@
+name: 'running_results'
+version: '1.0.0'
+
+profile: 'running_results'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:         
+  - "target"
+  - "dbt_packages"
+
+# Configuring models
+# Full documentation: https://docs.getdbt.com/docs/configuring-models
+
+models:
+  running_results:
+    +database: "awsdatacatalog"
+
+    bronze:
+      +materialized: view
+
+    # silver:
+    #   +materialized: table
+    #   +table_type: hive
+
+    # gold:
+    #   +materialized: table
+    #   +table_type: hive
