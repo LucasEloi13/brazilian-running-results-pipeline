@@ -31,6 +31,13 @@ FREQUENCY_POLICY_BY_DIMENSION = {
     "date": "weekly",
     "event": "always",
     "modality": "always",
+    "extraction_job": "always",
+    "extraction_task": "always",
+}
+
+QUERY_BY_DIMENSION = {
+    "extraction_job": "SELECT * FROM extraction_job",
+    "extraction_task": "SELECT * FROM extraction_task WHERE status = 'completed'",
 }
 
 
@@ -101,9 +108,13 @@ class DimensionsStorage:
         return False, "weekly-window-not-reached"
 
     def _fetch_dimension_rows(self, dimension: str) -> tuple[list[str], list[tuple[Any, ...]]]:
-        table_name = _validate_identifier(dimension)
+        query = QUERY_BY_DIMENSION.get(dimension)
         with self.db.cursor() as cur:
-            cur.execute(sql.SQL("SELECT * FROM {}") .format(sql.Identifier(table_name)))
+            if query:
+                cur.execute(query)
+            else:
+                table_name = _validate_identifier(dimension)
+                cur.execute(sql.SQL("SELECT * FROM {}").format(sql.Identifier(table_name)))
             columns = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
             return columns, rows
