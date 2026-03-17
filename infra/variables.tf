@@ -2,6 +2,7 @@ variable "allowed_ip_cidr" {
   description = "Allowed IP CIDR for RDS access"
   type        = string
 }
+
 variable "aws_region" {
   description = "Aws region to deploy resources"
   type        = string

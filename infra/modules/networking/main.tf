@@ -17,26 +17,23 @@ resource "aws_subnet" "private" {
   availability_zone = data.aws_availability_zones.available.names[count.index]
 }
 
-resource "aws_route_table" "private" {
+resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
 }
 
 resource "aws_route_table_association" "private" {
   count          = 2
   subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private.id
-}
-
-resource "aws_security_group" "ec2" {
-  name   = "${var.name_suffix}-ec2-ssm-sg"
-  vpc_id = aws_vpc.main.id
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  route_table_id = aws_route_table.public.id
 }
 
 resource "aws_security_group" "rds" {
@@ -44,11 +41,11 @@ resource "aws_security_group" "rds" {
   vpc_id = aws_vpc.main.id
 
   ingress {
-    description     = "Postgres from EC2 (SSM)"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ec2.id]
+    description = "Postgres from allowed public IP"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [var.allowed_ip_cidr]
   }
 
   egress {
@@ -64,82 +61,6 @@ resource "aws_db_subnet_group" "main" {
   subnet_ids = aws_subnet.private[*].id
 }
 
-# --------- VPC Interface Endpoints (SSM) ----------
-# - ssm
-# - ssmmessages
-# - ec2messages
-resource "aws_security_group" "vpce" {
-  name   = "${var.name_suffix}-vpce-sg"
-  vpc_id = aws_vpc.main.id
-
-  ingress {
-    description     = "HTTPS from EC2 to VPC Endpoints"
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ec2.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "aws_vpc_endpoint" "ssm" {
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.${data.aws_region.current.name}.ssm"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = aws_subnet.private[*].id
-  security_group_ids  = [aws_security_group.vpce.id]
-  private_dns_enabled = true
-}
-
-resource "aws_vpc_endpoint" "ssmmessages" {
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.${data.aws_region.current.name}.ssmmessages"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = aws_subnet.private[*].id
-  security_group_ids  = [aws_security_group.vpce.id]
-  private_dns_enabled = true
-
-}
-
-resource "aws_vpc_endpoint" "ec2messages" {
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.${data.aws_region.current.name}.ec2messages"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = aws_subnet.private[*].id
-  security_group_ids  = [aws_security_group.vpce.id]
-  private_dns_enabled = true
-}
-
-# --------- IAM role / instance profile for SSM ----------
-resource "aws_iam_role" "ec2_ssm_role" {
-  name = "${var.name_suffix}-ec2-ssm-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action    = "sts:AssumeRole"
-      Effect    = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ssm_core" {
-  role       = aws_iam_role.ec2_ssm_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "${var.name_suffix}-ec2-ssm-profile"
-  role = aws_iam_role.ec2_ssm_role.name
-}
-
 # Outputs
 output "private_subnet_ids" {
   value = aws_subnet.private[*].id
@@ -149,14 +70,6 @@ output "rds_security_group_id" {
   value = aws_security_group.rds.id
 }
 
-output "ec2_security_group_id" {
-  value = aws_security_group.ec2.id
-}
-
 output "db_subnet_group_name" {
   value = aws_db_subnet_group.main.name
-}
-
-output "ec2_instance_profile_name" {
-  value = aws_iam_instance_profile.ec2_profile.name
 }
