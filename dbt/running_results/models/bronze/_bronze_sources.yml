@@ -1,0 +1,16 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Glue/Athena raw and exported dimensions in running_results schema.
+    database: awsdatacatalog
+    schema: running_results
+    tables:
+      - name: dim_results
+      - name: dim_state
+      - name: dim_city
+      - name: dim_date
+      - name: dim_event
+      - name: dim_modality
+      - name: dim_extraction_job
+      - name: dim_extraction_task
