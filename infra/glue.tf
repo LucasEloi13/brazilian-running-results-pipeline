@@ -655,7 +655,7 @@ resource "aws_glue_catalog_table" "dim_results" {
     # CSV columns (in exact header order)
     columns {
       name    = "geral"
-      type    = "string"
+      type    = "int"
       comment = "Overall position (raw from HTML)"
     }
     columns {
@@ -680,18 +680,18 @@ resource "aws_glue_catalog_table" "dim_results" {
     }
     columns {
       name    = "pace"
-      type    = "int"
-      comment = "Pace in seconds"
+      type    = "string"
+      comment = "Pace (time string, e.g. mm:ss)"
     }
     columns {
       name    = "tempo"
-      type    = "int"
-      comment = "Finish time in seconds"
+      type    = "string"
+      comment = "Elapsed time (time string, e.g. hh:mm:ss)"
     }
     columns {
       name    = "gap"
-      type    = "int"
-      comment = "Gap to winner in seconds"
+      type    = "string"
+      comment = "Gap to winner (time string, e.g. hh:mm:ss)"
     }
     columns {
       name    = "raw_row_id"
@@ -725,8 +725,8 @@ resource "aws_glue_catalog_table" "dim_results" {
     }
     columns {
       name    = "finish_time"
-      type    = "int"
-      comment = "Finish time in seconds"
+      type    = "string"
+      comment = "Finish time (time string, e.g. hh:mm:ss)"
     }
     columns {
       name    = "job_id"
