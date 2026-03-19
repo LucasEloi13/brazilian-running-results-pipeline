@@ -15,15 +15,38 @@ def _ascii(text: str | None) -> str:
 
 
 def _parse_distance_km(raw_category_name: str) -> float | None:
-    match = re.search(r"(\d+(?:[\.,]\d+)?)", _ascii(raw_category_name))
-    if not match:
+    normalized = _ascii(raw_category_name).upper()
+
+    # Preferred path: explicit unit right after number.
+    match_with_unit = re.search(r"(\d+(?:[\.,]\d+)?)\s*(KM|K|M)\b", normalized)
+    if match_with_unit:
+        numeric = match_with_unit.group(1).replace(",", ".")
+        unit = match_with_unit.group(2)
+        try:
+            value = float(numeric)
+        except ValueError:
+            return None
+
+        if unit in {"K", "KM"}:
+            return value
+        return value / 1000.0
+
+    # Fallback for malformed labels without explicit unit.
+    match_without_unit = re.search(r"(\d+(?:[\.,]\d+)?)", normalized)
+    if not match_without_unit:
         return None
 
-    numeric = match.group(1).replace(",", ".")
+    numeric = match_without_unit.group(1).replace(",", ".")
     try:
-        return float(numeric)
+        value = float(numeric)
     except ValueError:
         return None
+
+    # Distances >= 100 without unit usually represent meters in source labels.
+    if value >= 100:
+        return value / 1000.0
+
+    return None
 
 
 def parse_modality_targets(html: str, base_url: str) -> list[dict[str, Any]]:

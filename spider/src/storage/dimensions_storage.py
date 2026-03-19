@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import sys
+from decimal import Decimal
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -33,6 +34,17 @@ FREQUENCY_POLICY_BY_DIMENSION = {
     "modality": "always",
     "extraction_job": "always",
     "extraction_task": "always",
+}
+
+PARQUET_TYPE_OVERRIDES_BY_DIMENSION: dict[str, dict[str, pa.DataType]] = {
+    # Keep modality parquet aligned with Glue table types in infra/glue.tf.
+    "modality": {
+        "id": pa.int32(),
+        "event_id": pa.int32(),
+        "distance_km": pa.float64(),
+        "is_pcd": pa.bool_(),
+        "raw_category_name": pa.string(),
+    }
 }
 
 QUERY_BY_DIMENSION = {
@@ -120,13 +132,33 @@ class DimensionsStorage:
             return columns, rows
 
     @staticmethod
-    def _build_parquet_bytes(columns: list[str], rows: list[tuple[Any, ...]]) -> bytes:
+    def _coerce_values_for_arrow(values: list[Any], target_type: pa.DataType) -> list[Any]:
+        if pa.types.is_floating(target_type):
+            return [float(value) if isinstance(value, Decimal) else value for value in values]
+        return values
+
+    @staticmethod
+    def _build_parquet_bytes(
+        dimension: str,
+        columns: list[str],
+        rows: list[tuple[Any, ...]],
+    ) -> bytes:
         arrays: dict[str, list[Any]] = {column: [] for column in columns}
         for row in rows:
             for index, column in enumerate(columns):
                 arrays[column].append(row[index])
 
-        table = pa.table(arrays)
+        type_overrides = PARQUET_TYPE_OVERRIDES_BY_DIMENSION.get(dimension, {})
+        pa_arrays = []
+        for column in columns:
+            if column in type_overrides:
+                target_type = type_overrides[column]
+                values = DimensionsStorage._coerce_values_for_arrow(arrays[column], target_type)
+                pa_arrays.append(pa.array(values, type=target_type))
+            else:
+                pa_arrays.append(pa.array(arrays[column]))
+
+        table = pa.Table.from_arrays(pa_arrays, names=columns)
         output = BytesIO()
         pq.write_table(table, output, compression="snappy")
         return output.getvalue()
@@ -152,7 +184,7 @@ class DimensionsStorage:
             return {"dimension": dimension, "status": "skipped", "reason": reason, "rows": 0}
 
         columns, rows = self._fetch_dimension_rows(dimension)
-        payload = self._build_parquet_bytes(columns, rows)
+        payload = self._build_parquet_bytes(dimension, columns, rows)
         key = self._destination_key(dimension)
         self.s3_client.put_object(
             Bucket=self.s3_bucket,
