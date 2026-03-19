@@ -437,7 +437,7 @@ resource "aws_glue_catalog_table" "results_csv" {
     # Header: geral,cat,numero,nome,equipe,pace,tempo,gap,raw_row_id,overall,category,bib,athlete_name,team,finish_time,job_id,task_id,event_id,modality_id,gender,distance_km,is_pcd,raw_category_name
     columns {
       name    = "geral"
-      type    = "string"
+      type    = "int"
       comment = "Overall position (raw from HTML)"
     }
     columns {
@@ -680,27 +680,27 @@ resource "aws_glue_catalog_table" "dim_results" {
     }
     columns {
       name    = "pace"
-      type    = "string"
-      comment = "Pace per km (raw)"
+      type    = "int"
+      comment = "Pace in seconds"
     }
     columns {
       name    = "tempo"
-      type    = "string"
-      comment = "Finish time (raw)"
+      type    = "int"
+      comment = "Finish time in seconds"
     }
     columns {
       name    = "gap"
-      type    = "string"
-      comment = "Gap to winner (raw)"
+      type    = "int"
+      comment = "Gap to winner in seconds"
     }
     columns {
       name    = "raw_row_id"
-      type    = "string"
+      type    = "int"
       comment = "HTML row id"
     }
     columns {
       name    = "overall"
-      type    = "string"
+      type    = "int"
       comment = "Overall position"
     }
     columns {
@@ -725,27 +725,27 @@ resource "aws_glue_catalog_table" "dim_results" {
     }
     columns {
       name    = "finish_time"
-      type    = "string"
-      comment = "Finish time"
+      type    = "int"
+      comment = "Finish time in seconds"
     }
     columns {
       name    = "job_id"
-      type    = "string"
+      type    = "int"
       comment = "Job ID"
     }
     columns {
       name    = "task_id"
-      type    = "string"
+      type    = "int"
       comment = "Task ID"
     }
     columns {
       name    = "event_id"
-      type    = "string"
+      type    = "int"
       comment = "Event ID"
     }
     columns {
       name    = "modality_id"
-      type    = "string"
+      type    = "int"
       comment = "Modality ID"
     }
     columns {
@@ -760,7 +760,7 @@ resource "aws_glue_catalog_table" "dim_results" {
     }
     columns {
       name    = "is_pcd"
-      type    = "string"
+      type    = "boolean"
       comment = "PCD flag"
     }
     columns {

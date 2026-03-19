@@ -21,7 +21,7 @@ models:
   running_results:
     +database: "awsdatacatalog"
 
-    bronze:
+    staging:
       +materialized: view
 
     # silver:

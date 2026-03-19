@@ -46,7 +46,7 @@ TARGET_TABLE = "dim_results"
 # Column order must match the storage_descriptor order in glue.tf (results_csv + dim_results) exactly.
 # First: partition columns from S3 path (these are extracted from path, not CSV)
 # Then: all CSV columns in exact header order
-_COLUMNS = (
+_TARGET_COLUMNS = (
     # Partition columns (from S3 path structure)
     "state",
     "city",
@@ -79,7 +79,76 @@ _COLUMNS = (
     "is_pcd",
     "raw_category_name",
 )
-COLUMN_LIST = ", ".join(_COLUMNS)
+TARGET_COLUMN_LIST = ", ".join(_TARGET_COLUMNS)
+
+
+def _to_int(column_name: str) -> str:
+    return f"TRY_CAST(NULLIF(TRIM(CAST({column_name} AS VARCHAR)), '') AS INTEGER)"
+
+
+def _to_bool(column_name: str) -> str:
+    normalized = f"LOWER(TRIM(CAST({column_name} AS VARCHAR)))"
+    return f"""
+CASE
+    WHEN {normalized} IN ('true', 't', '1', 'yes', 'y', 'sim') THEN TRUE
+    WHEN {normalized} IN ('false', 'f', '0', 'no', 'n', 'nao', 'não') THEN FALSE
+    ELSE NULL
+END
+""".strip()
+
+
+def _duration_to_seconds(column_name: str) -> str:
+    normalized = f"TRIM(CAST({column_name} AS VARCHAR))"
+    return f"""
+CASE
+    WHEN {normalized} = '' THEN NULL
+    WHEN REGEXP_LIKE({normalized}, '^\\d{{1,2}}:\\d{{2}}:\\d{{2}}$') THEN
+        TRY_CAST(SPLIT_PART({normalized}, ':', 1) AS INTEGER) * 3600
+        + TRY_CAST(SPLIT_PART({normalized}, ':', 2) AS INTEGER) * 60
+        + TRY_CAST(SPLIT_PART({normalized}, ':', 3) AS INTEGER)
+    WHEN REGEXP_LIKE({normalized}, '^\\d{{1,3}}:\\d{{2}}$') THEN
+        TRY_CAST(SPLIT_PART({normalized}, ':', 1) AS INTEGER) * 60
+        + TRY_CAST(SPLIT_PART({normalized}, ':', 2) AS INTEGER)
+    WHEN REGEXP_LIKE({normalized}, '^\\d+$') THEN
+        TRY_CAST({normalized} AS INTEGER)
+    ELSE NULL
+END
+""".strip()
+
+
+SELECT_COLUMN_LIST = ",\n    ".join(
+    [
+        "state",
+        "city",
+        "modality",
+        "pcd",
+        "gender_partition",
+        "event",
+        f"{_to_int('geral')} AS geral",
+        "cat",
+        "numero",
+        "nome",
+        "equipe",
+        f"{_duration_to_seconds('pace')} AS pace",
+        f"{_duration_to_seconds('tempo')} AS tempo",
+        f"{_duration_to_seconds('gap')} AS gap",
+        f"{_to_int('raw_row_id')} AS raw_row_id",
+        f"{_to_int('overall')} AS overall",
+        "category",
+        "bib",
+        "athlete_name",
+        "team",
+        f"{_duration_to_seconds('finish_time')} AS finish_time",
+        f"{_to_int('job_id')} AS job_id",
+        f"{_to_int('task_id')} AS task_id",
+        f"{_to_int('event_id')} AS event_id",
+        f"{_to_int('modality_id')} AS modality_id",
+        "gender",
+        "distance_km",
+        f"{_to_bool('is_pcd')} AS is_pcd",
+        "raw_category_name",
+    ]
+)
 
 logger = logging.getLogger("csv_to_parquet")
 
@@ -206,8 +275,9 @@ def insert_job_ids(client, output_location: str, job_ids: set[str]) -> None:
     """INSERT INTO dim_results only the rows belonging to the given job_ids."""
     ids_literal = ", ".join(f"'{jid}'" for jid in sorted(job_ids))
     query = f"""
-INSERT INTO {TARGET_TABLE} ({COLUMN_LIST})
-SELECT {COLUMN_LIST}
+INSERT INTO {TARGET_TABLE} ({TARGET_COLUMN_LIST})
+SELECT
+    {SELECT_COLUMN_LIST}
 FROM   {SOURCE_TABLE}
 WHERE  job_id IN ({ids_literal})
 """.strip()
@@ -248,8 +318,9 @@ def full_refresh(athena_client, s3_client, config: dict[str, Any], output_locati
     logger.info("Deleted %d object(s) from S3.", deleted)
 
     query = f"""
-INSERT INTO {TARGET_TABLE} ({COLUMN_LIST})
-SELECT {COLUMN_LIST}
+INSERT INTO {TARGET_TABLE} ({TARGET_COLUMN_LIST})
+SELECT
+    {SELECT_COLUMN_LIST}
 FROM   {SOURCE_TABLE}
 """.strip()
     _run_query(athena_client, query, output_location)
