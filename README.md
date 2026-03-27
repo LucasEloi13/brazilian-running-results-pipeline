@@ -1,128 +1,291 @@
 # Brazilian Running Results Pipeline
 
-Este repositório contém um *spider* Python que extrai dados de corridas do site OpenResults, persiste metadados no PostgreSQL e prepara a base para análises posteriores.
+Pipeline de dados para corridas de rua no Brasil, cobrindo ingestao, persistencia,
+exportacao para data lake e transformacao analitica.
 
-## 📂 Estrutura geral
+## Visao geral
 
+<p align="center">
+  <img src="docs/img/pipeline_diagram.png" alt="Pipeline Diagram" width="600"/>
+</p>
+
+O projeto possui quatro blocos principais:
+
+1. `spider/`: extracao e processamento de dados do OpenResults para PostgreSQL + S3.
+2. `infra/`: provisionamento AWS via Terraform (rede, RDS, S3, Glue Data Catalog).
+3. `dbt/running_results/`: modelagem medalhao em Athena (staging, intermediate, marts).
+4. `orchestration/`: reservado para orquestracao (ex.: Airflow).
+
+Fluxo macro:
+
+1. Coleta eventos no OpenResults.
+2. Persiste dimensoes e fila de tarefas no PostgreSQL.
+3. Extrai resultados por modalidade/genero e grava CSV particionado em S3.
+4. Exporta dimensoes em Parquet para S3.
+5. Registra particoes no Glue e converte resultados em `dim_results` no Athena.
+6. Executa dbt para gerar camada analitica final.
+
+## Arquitetura (alto nivel)
+
+```text
+OpenResults API/HTML
+        |
+        v
+Spider (Python)
+  - task_extract_and_store_names
+  - task_scrape_and_store_results
+  - task_export_dimensions
+        |
+        +--> PostgreSQL (estado operacional: eventos, modalidades, jobs, tasks)
+        |
+        +--> S3 (results/*.csv e dims/*.parquet)
+                    |
+                    v
+              Glue/Athena (tabelas externas)
+                    |
+                    v
+                 dbt (silver/gold)
 ```
-README.md                      # este arquivo
-infra/                         # terraform para infraestrutura (RDS, rede etc.)
-spider/                         # código Python do extractor e armazenamento
+
+## Estrutura do repositorio
+
+```text
+README.md
+infra/
+  glue.tf
+  main.tf
+  modules/
+  scripts/
+spider/
+  main.py
+  task_extract_and_store_names.py
+  task_scrape_and_store_results.py
+  task_export_dimensions.py
+  config/config.yml
   src/
+    database/
+    extractors/
+    parses/
+    storage/
   test/
-  pyproject.toml               # dependências e configuração do uv
-  config/config.yml            # parâmetros de scraping
-  .venv/                       # virtual env (não versionado)
+dbt/
+  running_results/
+    dbt_project.yml
+    profiles.example.yml
+    models/
 ```
 
-### Principais componentes dentro de `spider/src`
+## Pre-requisitos
 
-- `database/connections/postgres.py` – singleton de conexão com Postgres
-- `database/migrations` – SQL de criação de tabelas + script `run_migration.py`
-- `extractors/` – classes que fazem scraping das páginas
-- `parses/` – lógica de parsing HTML em objetos dataclass
-- `storage/` – persistência com deduplicação baseada em hash do slug
-- `main.py` – fluxo principal que faz extração + persistência
+- Python 3.14+
+- PostgreSQL acessivel
+- AWS CLI configurado com perfil valido
+- Terraform >= 1.0
+- dbt Core + adapter Athena
+- `uv` (recomendado para ambiente Python)
 
-## 🛠️ Pré-requisitos
+## Quickstart local
 
-- Python 3.14 ou superior
-- PostgreSQL acessível (local ou remoto)
-- [`uv`](https://pypi.org/project/uv/) disponível (instalado no `.venv`)
-- (Opcional) [Terraform](https://www.terraform.io/) para criar a infra com `infra/`
-
-## 🚀 Configuração do ambiente (venv)
-
-No diretório `spider/` execute:
+### 1) Preparar ambiente do spider
 
 ```bash
-python -m venv .venv          # criar ambiente
-source .venv/bin/activate     # ativar
+cd spider
+python -m venv .venv
+source .venv/bin/activate
 pip install --upgrade pip
-uv install                    # instala dependências do pyproject.toml
+pip install uv
+uv sync
 ```
 
-Agora o `python`, `uv`, `pytest` etc. referem-se à versão isolada.
+### 2) Configurar variaveis de ambiente
 
-> Sempre ative o `.venv` antes de rodar qualquer script/nos comandos abaixo.
-
-## 🔧 Variáveis de ambiente
-
-Crie um `.env` (ou configure no ambiente) com as variáveis de conexão do Postgres:
+Crie um arquivo `.env` em `spider/`:
 
 ```env
 DB_HOST=localhost
-DB_PORT=5432          # opcional
-DB_NAME=yourdbname
-DB_USER=youruser
-DB_PASSWORD=yourpass
-DB_CONNECT_TIMEOUT=5   # segundos, opcional
+DB_PORT=5432
+DB_NAME=running_results
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_CONNECT_TIMEOUT=15
 ```
 
-O script de migration e os testes dependem dessas variáveis.
-
-## 🗂️ Migrações
-
-Antes de extrair eventos, crie as tabelas no banco com:
-
-```bash
-uv run -m src.database.migrations.run_migration
-# ou (sem -m) uv run src/database/migrations/run_migration.py
-```
-
-O SQL está em `src/database/migrations/migration.sql`; rodar o script várias vezes não causa erro
-(devido aos `IF NOT EXISTS`).
-
-## 🕸️ Extração de eventos
-
-Use o `main.py` para buscar corridas e salvar no banco:
+### 3) Executar migracao do banco
 
 ```bash
 cd spider
 source .venv/bin/activate
+uv run -m src.database.migrations.run_migration
+```
+
+Opcional: reset total (destrutivo):
+
+```bash
+uv run -m src.database.migrations.run_migration --hard-reset
+```
+
+### 4) Rodar pipeline local fim-a-fim
+
+```bash
 uv run python main.py
 ```
 
-O fluxo faz:
-1. buscar páginas do endpoint configurado em `config/config.yml`
-2. parsear cada evento em dataclasses
-3. gravar `state`, `city`, `date`, `event` e `modality` no PostgreSQL
-   - gera o `hash_slug` determinístico (MD5 do slug)
-   - ignora corridas cujo hash já exista para evitar duplicatas
+Esse comando executa em sequencia:
 
-Logs são escritos em `logs/app.log`.
+1. `extract_and_store_names`
+2. `scrape_and_store_results`
 
-## ✅ Testes
+Para exportar dimensoes para S3:
 
-Um teste `test_postgres_connection.py` garante que a conexão com PostgreSQL
-funciona; ele será pulado se as variáveis de ambiente não estiverem definidas.
+```bash
+uv run python task_export_dimensions.py
+```
 
-Para rodar todos os testes:
+## Execucao por tarefas
+
+Em `spider/`:
+
+```bash
+uv run python task_extract_and_store_names.py
+uv run python task_scrape_and_store_results.py
+uv run python task_export_dimensions.py
+```
+
+## Configuracao principal do pipeline
+
+Arquivo: `spider/config/config.yml`
+
+Secoes mais importantes:
+
+- `pipeline`: modo de extracao de eventos (`paged` ou `full`), paginas e batch.
+- `result_pipeline`: concorrencia, tamanho de lote e limite de tentativas.
+- `s3`: bucket, regiao, prefixos e profile AWS.
+- `extact_event_name` e `extact_event_result`: delay, timeout e user-agent.
+
+Observacao: as chaves no YAML estao nomeadas como `extact_*` no codigo atual.
+
+## Modelo operacional no PostgreSQL
+
+Criado por `spider/src/database/migrations/migration.sql`:
+
+- Dimensoes operacionais: `state`, `city`, `date`, `event`, `modality`, `category`.
+- Fato operacional: `result`.
+- Controle de processamento: `extraction_job`, `extraction_task`.
+
+Pontos de qualidade:
+
+- Dedupe de evento por `hash_slug` (MD5 do slug).
+- Dedupe de modalidade por `(event_id, raw_category_name)`.
+- Dedupe de resultado por `(modality_id, category_id, bib_number)`.
+
+## Data Lake + Athena
+
+O pipeline grava:
+
+- Resultados brutos em CSV sob `s3://<bucket>/results/...` (particionado por estado/cidade/modalidade/pcd/genero/evento).
+- Dimensoes em Parquet sob `s3://<bucket>/dims/<dimension>/data.parquet`.
+
+Scripts uteis em `infra/scripts/`:
+
+- `register_new_partitions.py`: registra apenas novas particoes em `results_csv`.
+- `csv_to_parquet.py`: carrega incrementalmente CSV para `dim_results` no Athena.
+
+Exemplos:
+
+```bash
+python infra/scripts/register_new_partitions.py --dry-run
+python infra/scripts/register_new_partitions.py --batch-size 100
+
+python infra/scripts/csv_to_parquet.py
+python infra/scripts/csv_to_parquet.py --full-refresh
+```
+
+## dbt (camada analitica)
+
+No diretorio `dbt/running_results`:
+
+```bash
+DBT_PROFILES_DIR=.. ../../.venv/bin/dbt debug
+DBT_PROFILES_DIR=.. ../../.venv/bin/dbt run
+DBT_PROFILES_DIR=.. ../../.venv/bin/dbt test
+```
+
+Camadas de modelos:
+
+1. `staging`: padronizacao inicial dos dados de origem (`dim_*`).
+2. `intermediate`: normalizacoes e regras de negocio.
+3. `marts`: visao analitica final (`fact_results`).
+
+## Infraestrutura (Terraform)
+
+Resumo dos recursos principais:
+
+- VPC/rede e regras de seguranca para RDS.
+- RDS PostgreSQL para armazenamento operacional.
+- S3 versionado e criptografado para resultados e dimensoes.
+- Glue Data Catalog com tabelas externas para Athena.
+
+Arquivo de exemplo de variaveis:
+
+`infra/terraform.tfvars.example`
+
+Comandos basicos:
+
+```bash
+cd infra
+terraform init
+terraform plan -var-file=terraform.tfvars
+terraform apply -var-file=terraform.tfvars
+```
+
+## Testes
+
+Em `spider/`:
 
 ```bash
 uv run pytest -q
 ```
 
-Adicione novos casos na pasta `test/` seguindo o mesmo padrão.
+Existem testes de parser e conexao com PostgreSQL.
 
-## 🧠 Como reproduzir problemas
+## Observabilidade e logs
 
-1. Ative o `.venv`
-2. Garanta que as variáveis do banco estão corretas
-3. Execute a migration (`uv run -m src.database.migrations.run_migration`)
-4. Execute `uv run python main.py` e observe os logs ou saídas no console
-5. Se o script falhar, inspecione as mensagens na tela/log e verifique a
-   conexão/estruturas de tabela no banco.
+- Logs do spider em `spider/logs/app.log`.
+- Configuracao em `spider/config/logger_config.py` e `spider/config/config.yml`.
 
-## 💡 Dicas adicionais
+## Troubleshooting
 
-- A classe `PostgresConnection` inclui um timeout configurável e fecha a
-  conexão automaticamente.
-- O `EventNameStorage` é responsável por deduplicar e armazenar os eventos.
-- As tabelas suportam reingestão incremental sem sobrescrever dados úteis.
+### Falha de conexao com PostgreSQL
 
----
+Verifique `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` e `DB_CONNECT_TIMEOUT`.
 
-Este projeto serve como base para um pipeline de ingestão concreto. Sinta-se
-à vontade para estender com novos extractors, armazenamento em S3, análise
-posterior, etc. Boa corrida! 🏃‍♂️
+### Pipeline de resultados nao sobe arquivos no S3
+
+Verifique em `spider/config/config.yml`:
+
+- `s3.bucket`
+- `s3.region`
+- `s3.profile_name`
+
+Tambem confirme credenciais AWS com permissao de `s3:PutObject`.
+
+### dbt nao encontra profile
+
+Garanta `DBT_PROFILES_DIR=..` e arquivo `dbt/profiles.yml` valido.
+
+### Athena com dados desatualizados
+
+Execute registro incremental de particoes antes da carga:
+
+```bash
+python infra/scripts/register_new_partitions.py
+python infra/scripts/csv_to_parquet.py
+```
+
+## Documentacao complementar
+
+- `spider/README.md`: detalhes de desenvolvimento e operacao do spider.
+- `infra/README.md`: guia de provisionamento e recursos Terraform.
+- `dbt/running_results/README.md`: setup e operacao do projeto dbt.
+- `docs/OPERATIONS.md`: runbook de operacao e resposta a incidentes.
+- `docs/DATA_CONTRACT.md`: contrato de dados entre ingestao, lake e dbt.
