@@ -97,23 +97,8 @@ END
 """.strip()
 
 
-def _duration_to_seconds(column_name: str) -> str:
-    normalized = f"TRIM(CAST({column_name} AS VARCHAR))"
-    return f"""
-CASE
-    WHEN {normalized} = '' THEN NULL
-    WHEN REGEXP_LIKE({normalized}, '^\\d{{1,2}}:\\d{{2}}:\\d{{2}}$') THEN
-        TRY_CAST(SPLIT_PART({normalized}, ':', 1) AS INTEGER) * 3600
-        + TRY_CAST(SPLIT_PART({normalized}, ':', 2) AS INTEGER) * 60
-        + TRY_CAST(SPLIT_PART({normalized}, ':', 3) AS INTEGER)
-    WHEN REGEXP_LIKE({normalized}, '^\\d{{1,3}}:\\d{{2}}$') THEN
-        TRY_CAST(SPLIT_PART({normalized}, ':', 1) AS INTEGER) * 60
-        + TRY_CAST(SPLIT_PART({normalized}, ':', 2) AS INTEGER)
-    WHEN REGEXP_LIKE({normalized}, '^\\d+$') THEN
-        TRY_CAST({normalized} AS INTEGER)
-    ELSE NULL
-END
-""".strip()
+def _to_text(column_name: str) -> str:
+    return f"NULLIF(TRIM(CAST({column_name} AS VARCHAR)), '')"
 
 
 SELECT_COLUMN_LIST = ",\n    ".join(
@@ -129,16 +114,16 @@ SELECT_COLUMN_LIST = ",\n    ".join(
         "numero",
         "nome",
         "equipe",
-        f"{_duration_to_seconds('pace')} AS pace",
-        f"{_duration_to_seconds('tempo')} AS tempo",
-        f"{_duration_to_seconds('gap')} AS gap",
+        f"{_to_text('pace')} AS pace",
+        f"{_to_text('tempo')} AS tempo",
+        f"{_to_text('gap')} AS gap",
         f"{_to_int('raw_row_id')} AS raw_row_id",
         f"{_to_int('overall')} AS overall",
         "category",
         "bib",
         "athlete_name",
         "team",
-        f"{_duration_to_seconds('finish_time')} AS finish_time",
+        f"{_to_text('finish_time')} AS finish_time",
         f"{_to_int('job_id')} AS job_id",
         f"{_to_int('task_id')} AS task_id",
         f"{_to_int('event_id')} AS event_id",

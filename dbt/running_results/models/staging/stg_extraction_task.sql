@@ -1,6 +1,3 @@
--- select *
--- from {{ source('raw', 'dim_extraction_task') }}
-
 with source as (
     
     select * from {{ source('raw', 'dim_extraction_task') }}
@@ -20,9 +17,8 @@ renamed as (
         redshift_loaded,
         row_count as extraction_task_row_count,
         attempts as extraction_task_attempts,
-        last_attempted_at as extraction_task_last_attempted_at,
+        last_attempt_at as extraction_task_last_attempt_at,
         created_at AS extraction_task_created_at,
-        updated_at AS extraction_task_updated_at,
         error_msg
 
     from source
